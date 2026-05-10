@@ -217,13 +217,9 @@ final class HistoryRenderer {
         // right edge even when we have fewer samples than the view width.
         let xOffset = W - CGFloat(visible) * colW
 
-        // Overlay lines drawn first so CPU bars overpaint them.
+        // Lines drawn BEFORE bars (memory, disk) sit behind the CPU stack.
+        // GPU is drawn AFTER bars so it stays visible at high CPU load.
         if visible > 1 {
-            if showGPU {
-                drawLine(visible: visible, xOffset: xOffset, colW: colW,
-                         bandY: inner.minY, bandH: cpuH,
-                         color: colors.gpu) { $0.gpu }
-            }
             if showMemory {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
@@ -273,6 +269,13 @@ final class HistoryRenderer {
             NSRect(x: x, y: y, width: colW, height: eUsr).fill()
         }
 
+        // GPU sits above the CPU bars so it's always visible.
+        if visible > 1, showGPU {
+            drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                     bandY: inner.minY, bandH: cpuH,
+                     color: colors.gpu) { $0.gpu }
+        }
+
         NSGraphicsContext.current?.cgContext.restoreGState()
     }
 
@@ -280,15 +283,28 @@ final class HistoryRenderer {
                           bandY: CGFloat, bandH: CGFloat, color: NSColor,
                           lineWidth: CGFloat = 2.5,
                           value: (HistoryFrame) -> Double) {
+        // Skip individual zero-ish datapoints, breaking the line into
+        // segments. Idle stretches leave a gap rather than a baseline line.
         let path = NSBezierPath()
         path.lineWidth = lineWidth
         path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+        var inSegment = false
         for i in 0..<visible {
-            let f = frames[visibleIndex(i)]
+            let v = value(frames[visibleIndex(i)])
+            if v <= 0.001 {
+                inSegment = false
+                continue
+            }
             let x = xOffset + CGFloat(i) * colW + colW / 2
-            let y = bandY + CGFloat(value(f)) * bandH
-            if i == 0 { path.move(to: NSPoint(x: x, y: y)) }
-            else      { path.line(to: NSPoint(x: x, y: y)) }
+            let y = bandY + CGFloat(v) * bandH
+            let p = NSPoint(x: x, y: y)
+            if inSegment {
+                path.line(to: p)
+            } else {
+                path.move(to: p)
+                inSegment = true
+            }
         }
         color.setStroke()
         path.stroke()
