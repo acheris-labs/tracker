@@ -1,0 +1,110 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 0.2.0, no v prefix)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            TAG="v${VERSION}"
+          else
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # Pre-release if version contains a hyphen (e.g. 0.2.0-rc1).
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "→ tag=$TAG version=$VERSION"
+
+      - name: Toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: Build (Release, versioned from tag)
+        run: |
+          xcodebuild -project Tracker.xcodeproj \
+                     -scheme Tracker \
+                     -configuration Release \
+                     MARKETING_VERSION="${{ steps.v.outputs.version }}" \
+                     CURRENT_PROJECT_VERSION="$(date +%s)" \
+                     build
+
+      - name: Locate built .app
+        id: app
+        run: |
+          APP=$(xcodebuild -project Tracker.xcodeproj -scheme Tracker \
+                           -configuration Release -showBuildSettings 2>/dev/null \
+                | awk -F' = ' '/^[ \t]*BUILT_PRODUCTS_DIR/ { print $2 "/Tracker.app"; exit }')
+          echo "path=$APP" >> "$GITHUB_OUTPUT"
+          codesign -dv "$APP" 2>&1
+
+      - name: Stage app for DMG
+        run: |
+          rm -rf staging
+          mkdir -p staging
+          cp -R "${{ steps.app.outputs.path }}" staging/
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Build DMG
+        id: dmg
+        run: |
+          DMG="Tracker-${{ steps.v.outputs.version }}.dmg"
+          create-dmg \
+            --volname "Tracker ${{ steps.v.outputs.version }}" \
+            --window-size 540 360 \
+            --icon-size 96 \
+            --icon "Tracker.app" 140 180 \
+            --hide-extension "Tracker.app" \
+            --app-drop-link 400 180 \
+            "$DMG" \
+            "staging/"
+          ls -la "$DMG"
+          echo "path=$DMG" >> "$GITHUB_OUTPUT"
+
+      - name: Create or push tag (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ steps.v.outputs.tag }}"
+          if ! git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARGS=(--generate-notes --title "Tracker ${{ steps.v.outputs.version }}")
+          if [ "${{ steps.v.outputs.prerelease }}" = "true" ]; then
+            ARGS+=(--prerelease)
+          fi
+          gh release create "${{ steps.v.outputs.tag }}" \
+            "${ARGS[@]}" \
+            "${{ steps.dmg.outputs.path }}"
