@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Build (Release)
+        run: make build
+
+      - name: Locate built .app
+        id: app
+        run: |
+          APP=$(make -s app-path)
+          echo "path=$APP" >> "$GITHUB_OUTPUT"
+          echo "Built: $APP"
+          ls -la "$APP"
+
+      - name: Verify ad-hoc signature
+        run: codesign -dv "$(make -s app-path)" 2>&1
+
+      - name: Upload Tracker.app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tracker.app
+          path: ${{ steps.app.outputs.path }}
+          if-no-files-found: error
