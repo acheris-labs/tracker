@@ -10,11 +10,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var renderer: HistoryRenderer!
     private var lastCPU = CPUFrame()
     private var lastGPU: Double = 0
-    private var lastBattery: Double = 0
+    private var lastBatteryInfo = BatteryInfo(
+        percent: 0, watts: 0, isCharging: false, externalConnected: false,
+        minutesToFull: nil, minutesToEmpty: nil
+    )
     private var lastMemory: Double = 0
     private var lastDiskRead: Double = 0
     private var lastDiskWrite: Double = 0
     private var prefs: PreferencesWindowController?
+    private var chart: ChartWindowController?
 
     private var dockMenu: NSMenu?
     private var pItem: NSMenuItem?
@@ -67,6 +71,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         true
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication,
+                                       hasVisibleWindows flag: Bool) -> Bool {
+        // If a window is already up, let AppKit bring it forward.
+        // Otherwise open the chart window.
+        if !flag { showChartWindow(nil) }
+        return true
+    }
+
+    @objc func showChartWindow(_ sender: Any?) {
+        if chart == nil {
+            chart = ChartWindowController(renderer: renderer,
+                                          hasBattery: battery.hasBattery)
+        }
+        NSApp.activate()
+        chart?.showWindow(nil)
+        chart?.window?.makeKeyAndOrderFront(nil)
+        chart?.refresh(cpu: lastCPU, gpu: lastGPU, battery: lastBatteryInfo,
+                       memory: lastMemory,
+                       diskRead: lastDiskRead, diskWrite: lastDiskWrite)
+    }
+
+    @objc func openActivityMonitor(_ sender: Any?) {
+        let url = URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")
+        NSWorkspace.shared.openApplication(at: url,
+                                           configuration: NSWorkspace.OpenConfiguration())
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
@@ -149,6 +180,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         prefsItem.target = self
         menu.addItem(prefsItem)
 
+        let amItem = NSMenuItem(title: "Open Activity Monitor",
+                                action: #selector(openActivityMonitor(_:)),
+                                keyEquivalent: "")
+        amItem.target = self
+        menu.addItem(amItem)
+
         return menu
     }
 
@@ -160,7 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         eItem?.title = String(format: "E-cores: %.0f%%  (user %.0f / sys %.0f)",
                               eTotal, lastCPU.eUser * 100, lastCPU.eSys * 100)
         gItem?.title = String(format: "GPU: %.0f%%", lastGPU * 100)
-        bItem?.title = String(format: "Battery: %.0f%%", lastBattery * 100)
+        bItem?.title = Self.batteryMenuTitle(lastBatteryInfo)
         mItem?.title = String(format: "Memory: %.0f%%", lastMemory * 100)
         let r = Self.bytesFormatter.string(fromByteCount: Int64(lastDiskRead))
         let w = Self.bytesFormatter.string(fromByteCount: Int64(lastDiskWrite))
@@ -189,12 +226,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showBattery: renderer.showBattery,
                 showMemory: renderer.showMemory,
                 showDisk: renderer.showDisk,
+                drainThreshold: Self.intDefault("BadgeThresholdWatts", default: 20),
                 onDurationChange: { [weak self] s in self?.applyDuration(s) },
                 onColorsChange: { [weak self] c in self?.applyColors(c) },
                 onShowGPUChange: { [weak self] b in self?.applyShowGPU(b) },
                 onShowBatteryChange: { [weak self] b in self?.applyShowBattery(b) },
                 onShowMemoryChange: { [weak self] b in self?.applyShowMemory(b) },
-                onShowDiskChange: { [weak self] b in self?.applyShowDisk(b) }
+                onShowDiskChange: { [weak self] b in self?.applyShowDisk(b) },
+                onThresholdChange: { [weak self] v in self?.applyThreshold(v) }
             )
         } else {
             prefs?.sync(currentDuration: renderer.capacity)
@@ -207,6 +246,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func boolDefault(_ key: String, default fallback: Bool) -> Bool {
         UserDefaults.standard.object(forKey: key) as? Bool ?? fallback
+    }
+
+    private static func intDefault(_ key: String, default fallback: Int) -> Int {
+        UserDefaults.standard.object(forKey: key) as? Int ?? fallback
+    }
+
+    private func applyThreshold(_ v: Int) {
+        let clamped = max(1, min(200, v))
+        UserDefaults.standard.set(clamped, forKey: "BadgeThresholdWatts")
+        // tick() reads the value each second, so it picks up immediately.
+    }
+
+    private func updateDockBadge(_ b: BatteryInfo) {
+        // Only flag heavy drain — light idle discharge doesn't warrant a
+        // big red pill. Threshold (in watts) is configurable; default 20W.
+        let threshold = UserDefaults.standard.object(forKey: "BadgeThresholdWatts")
+            as? Int ?? 20
+        if !b.externalConnected, abs(b.watts) >= Double(threshold) {
+            NSApp.dockTile.badgeLabel = String(format: "%.0fw", abs(b.watts))
+        } else {
+            NSApp.dockTile.badgeLabel = nil
+        }
+    }
+
+    private static func batteryMenuTitle(_ b: BatteryInfo) -> String {
+        let pct = String(format: "%.0f%%", b.percent * 100)
+        let flowing = abs(b.watts) >= 0.1
+        if flowing, b.isCharging, let m = b.minutesToFull {
+            return "Battery: \(pct)  (+\(String(format: "%.1f", b.watts)) W · full in \(formatMinutes(m)))"
+        }
+        if flowing, !b.isCharging, let m = b.minutesToEmpty {
+            return "Battery: \(pct)  (−\(String(format: "%.1f", abs(b.watts))) W · empty in \(formatMinutes(m)))"
+        }
+        if flowing {
+            let sign = b.isCharging ? "+" : "−"
+            return "Battery: \(pct)  (\(sign)\(String(format: "%.1f", abs(b.watts))) W)"
+        }
+        if b.externalConnected {
+            return "Battery: \(pct)  (on AC, holding)"
+        }
+        return "Battery: \(pct)"
+    }
+
+    private static func formatMinutes(_ m: Int) -> String {
+        if m < 60 { return "\(m)m" }
+        return "\(m / 60)h \(m % 60)m"
     }
 
     private func applyShowGPU(_ on: Bool) {
@@ -255,18 +340,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func tick() {
         let f = cpu.sample()
         let g = gpu.sample()
-        let b = battery.sample() ?? lastBattery
+        let bi = battery.sample() ?? lastBatteryInfo
         let m = memory.sample()
         let (dr, dw) = disk.sample()
         lastCPU = f
         lastGPU = g
-        lastBattery = b
+        lastBatteryInfo = bi
         lastMemory = m
         lastDiskRead = dr
         lastDiskWrite = dw
-        renderer.append(cpu: f, gpu: g, battery: b, memory: m,
+        renderer.append(cpu: f, gpu: g, battery: bi.percent, memory: m,
                         diskRead: dr, diskWrite: dw)
         NSApp.applicationIconImage = renderer.render()
+        updateDockBadge(bi)
+        chart?.refresh(cpu: f, gpu: g, battery: bi, memory: m,
+                       diskRead: dr, diskWrite: dw)
     }
 
     private func buildMainMenu() -> NSMenu {
@@ -281,6 +369,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: ""
         ))
         appMenu.addItem(.separator())
+        let chartItem = NSMenuItem(
+            title: "Show Chart",
+            action: #selector(showChartWindow(_:)),
+            keyEquivalent: "0"
+        )
+        chartItem.target = self
+        appMenu.addItem(chartItem)
         let prefsItem = NSMenuItem(
             title: "Preferences…",
             action: #selector(showPreferences(_:)),

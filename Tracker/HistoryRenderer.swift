@@ -15,7 +15,6 @@ struct ChartColors {
     var pUser: NSColor
     var eUser: NSColor
     var gpu: NSColor
-    var battery: NSColor
     var memory: NSColor
     var diskRead: NSColor
     var diskWrite: NSColor
@@ -26,7 +25,6 @@ struct ChartColors {
         pUser:     NSColor(srgbRed: 0.20, green: 0.85, blue: 0.30, alpha: 1),
         eUser:     NSColor(srgbRed: 0.30, green: 0.62, blue: 1.00, alpha: 1),
         gpu:       NSColor(srgbRed: 1.00, green: 0.30, blue: 0.85, alpha: 1),
-        battery:   NSColor(srgbRed: 1.00, green: 0.92, blue: 0.20, alpha: 1),
         memory:    NSColor(srgbRed: 0.92, green: 0.92, blue: 0.92, alpha: 1),
         diskRead:  NSColor(srgbRed: 0.20, green: 0.85, blue: 0.85, alpha: 1),
         diskWrite: NSColor(srgbRed: 0.85, green: 0.45, blue: 0.95, alpha: 1)
@@ -35,7 +33,7 @@ struct ChartColors {
     private static let keys = (
         pSys: "Color.pSys", eSys: "Color.eSys",
         pUser: "Color.pUser", eUser: "Color.eUser",
-        gpu: "Color.gpu", battery: "Color.battery",
+        gpu: "Color.gpu",
         memory: "Color.memory",
         diskRead: "Color.diskRead", diskWrite: "Color.diskWrite"
     )
@@ -49,7 +47,6 @@ struct ChartColors {
             pUser:     d.string(forKey: keys.pUser).flatMap(NSColor.fromHex) ?? def.pUser,
             eUser:     d.string(forKey: keys.eUser).flatMap(NSColor.fromHex) ?? def.eUser,
             gpu:       d.string(forKey: keys.gpu).flatMap(NSColor.fromHex) ?? def.gpu,
-            battery:   d.string(forKey: keys.battery).flatMap(NSColor.fromHex) ?? def.battery,
             memory:    d.string(forKey: keys.memory).flatMap(NSColor.fromHex) ?? def.memory,
             diskRead:  d.string(forKey: keys.diskRead).flatMap(NSColor.fromHex) ?? def.diskRead,
             diskWrite: d.string(forKey: keys.diskWrite).flatMap(NSColor.fromHex) ?? def.diskWrite
@@ -63,7 +60,6 @@ struct ChartColors {
         d.set(pUser.hexString,     forKey: ChartColors.keys.pUser)
         d.set(eUser.hexString,     forKey: ChartColors.keys.eUser)
         d.set(gpu.hexString,       forKey: ChartColors.keys.gpu)
-        d.set(battery.hexString,   forKey: ChartColors.keys.battery)
         d.set(memory.hexString,    forKey: ChartColors.keys.memory)
         d.set(diskRead.hexString,  forKey: ChartColors.keys.diskRead)
         d.set(diskWrite.hexString, forKey: ChartColors.keys.diskWrite)
@@ -150,6 +146,19 @@ final class HistoryRenderer {
         return (head - visible + i + Self.maxStorage * 2) % Self.maxStorage
     }
 
+    /// Visible-window max disk throughput in bytes/sec — what the chart's
+    /// right-axis auto-scale is currently mapped to. Floor 1 MiB/s.
+    func diskScaleMax() -> Double {
+        let visible = visibleCount()
+        var maxIO: Double = 1_048_576
+        for i in 0..<visible {
+            let f = frames[visibleIndex(i)]
+            if f.diskRead > maxIO  { maxIO = f.diskRead }
+            if f.diskWrite > maxIO { maxIO = f.diskWrite }
+        }
+        return maxIO
+    }
+
     func render() -> NSImage {
         let pixelW = Int(pointSize.width * pixelScale)
         let pixelH = Int(pointSize.height * pixelScale)
@@ -176,7 +185,7 @@ final class HistoryRenderer {
         return image
     }
 
-    private func draw(in rect: NSRect) {
+    func draw(in rect: NSRect) {
         let bg = NSColor(white: 0.04, alpha: 1)
         bg.setFill()
         rect.fill()
@@ -214,11 +223,6 @@ final class HistoryRenderer {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
                          color: colors.gpu) { $0.gpu }
-            }
-            if hasBattery, showBattery {
-                drawLine(visible: visible, xOffset: xOffset, colW: colW,
-                         bandY: inner.minY, bandH: cpuH,
-                         color: colors.battery) { $0.battery }
             }
             if showMemory {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,

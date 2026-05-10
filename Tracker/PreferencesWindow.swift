@@ -8,6 +8,8 @@ final class PreferencesWindowController: NSWindowController {
     private let onShowBatteryChange: (Bool) -> Void
     private let onShowMemoryChange: (Bool) -> Void
     private let onShowDiskChange: (Bool) -> Void
+    private let onThresholdChange: (Int) -> Void
+    private weak var thresholdLabel: NSTextField?
 
     private weak var popup: NSPopUpButton?
 
@@ -15,6 +17,7 @@ final class PreferencesWindowController: NSWindowController {
     private let colorRows: [(label: String, keyPath: WritableKeyPath<ChartColors, NSColor>)]
     private var colorWells: [NSColorWell] = []
     private var colors: ChartColors
+    private var initialThreshold: Int = 20
 
     init(durations: [(label: String, seconds: Int)],
          currentDuration: Int,
@@ -24,12 +27,14 @@ final class PreferencesWindowController: NSWindowController {
          showBattery: Bool,
          showMemory: Bool,
          showDisk: Bool,
+         drainThreshold: Int,
          onDurationChange: @escaping (Int) -> Void,
          onColorsChange: @escaping (ChartColors) -> Void,
          onShowGPUChange: @escaping (Bool) -> Void,
          onShowBatteryChange: @escaping (Bool) -> Void,
          onShowMemoryChange: @escaping (Bool) -> Void,
-         onShowDiskChange: @escaping (Bool) -> Void) {
+         onShowDiskChange: @escaping (Bool) -> Void,
+         onThresholdChange: @escaping (Int) -> Void) {
         self.durations = durations
         self.colors = colors
         self.onDurationChange = onDurationChange
@@ -38,6 +43,8 @@ final class PreferencesWindowController: NSWindowController {
         self.onShowBatteryChange = onShowBatteryChange
         self.onShowMemoryChange = onShowMemoryChange
         self.onShowDiskChange = onShowDiskChange
+        self.onThresholdChange = onThresholdChange
+        self.initialThreshold = drainThreshold
 
         var rows: [(label: String, keyPath: WritableKeyPath<ChartColors, NSColor>)] = [
             ("P-core system", \.pSys),
@@ -46,9 +53,6 @@ final class PreferencesWindowController: NSWindowController {
             ("E-core user",   \.eUser),
             ("GPU",           \.gpu),
         ]
-        if hasBattery {
-            rows.append(("Battery", \.battery))
-        }
         rows.append(("Memory",     \.memory))
         rows.append(("Disk read",  \.diskRead))
         rows.append(("Disk write", \.diskWrite))
@@ -103,6 +107,30 @@ final class PreferencesWindowController: NSWindowController {
                                  target: self, action: #selector(toggleShowDisk(_:)))
         diskCheck.state = showDisk ? .on : .off
         grid.addRow(with: [Self.label(""), diskCheck])
+
+        // Drain alert threshold (W) — slider + value label.
+        let slider = NSSlider(value: Double(initialThreshold),
+                              minValue: 5, maxValue: 100,
+                              target: self, action: #selector(thresholdChanged(_:)))
+        slider.isContinuous = true
+        slider.allowsTickMarkValuesOnly = true
+        slider.numberOfTickMarks = 20  // every 5 W
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+
+        let valueLabel = NSTextField(labelWithString: "\(initialThreshold) W")
+        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        valueLabel.textColor = .secondaryLabelColor
+        valueLabel.alignment = .right
+        valueLabel.translatesAutoresizingMaskIntoConstraints = false
+        valueLabel.widthAnchor.constraint(equalToConstant: 50).isActive = true
+        self.thresholdLabel = valueLabel
+
+        let thresholdRow = NSStackView(views: [slider, valueLabel])
+        thresholdRow.orientation = .horizontal
+        thresholdRow.spacing = 8
+        thresholdRow.alignment = .centerY
+        grid.addRow(with: [Self.label("Drain alert above:"), thresholdRow])
 
         // Color rows
         for (i, row) in colorRows.enumerated() {
@@ -196,6 +224,12 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func toggleShowDisk(_ sender: NSButton) {
         onShowDiskChange(sender.state == .on)
+    }
+
+    @objc private func thresholdChanged(_ sender: NSSlider) {
+        let v = Int(sender.doubleValue.rounded())
+        thresholdLabel?.stringValue = "\(v) W"
+        onThresholdChange(v)
     }
 
     @objc private func resetColors(_ sender: NSButton) {

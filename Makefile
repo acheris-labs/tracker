@@ -25,6 +25,8 @@ run: build
 
 kill:
 	-killall $(TARGET) 2>/dev/null || true
+	@sleep 0.3
+	-pgrep -x $(TARGET) >/dev/null && killall -9 $(TARGET) 2>/dev/null || true
 
 rerun: kill run
 
@@ -42,6 +44,9 @@ history-30:
 
 history-180:
 	defaults write $(BUNDLE_ID) HistorySeconds -int 180
+
+badge-threshold-%:
+	defaults write $(BUNDLE_ID) BadgeThresholdWatts -int $*
 
 show-defaults:
 	-defaults read $(BUNDLE_ID) 2>/dev/null || echo "(no defaults set)"

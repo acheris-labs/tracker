@@ -17,6 +17,7 @@
 		AA0000000000000000000026 /* DiskSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000025 /* DiskSampler.swift */; };
 		AA0000000000000000000028 /* MemorySampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000027 /* MemorySampler.swift */; };
 		AA000000000000000000002A /* Tracker.icns in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000029 /* Tracker.icns */; };
+		AA000000000000000000002D /* ChartWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002C /* ChartWindow.swift */; };
 		AA000000000000000000001B /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001A /* AppKit.framework */; };
 		AA000000000000000000001D /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001C /* IOKit.framework */; };
 /* End PBXBuildFile section */
@@ -33,6 +34,7 @@
 		AA0000000000000000000025 /* DiskSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskSampler.swift; sourceTree = "<group>"; };
 		AA0000000000000000000027 /* MemorySampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySampler.swift; sourceTree = "<group>"; };
 		AA0000000000000000000029 /* Tracker.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Tracker.icns; sourceTree = "<group>"; };
+		AA000000000000000000002C /* ChartWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartWindow.swift; sourceTree = "<group>"; };
 		AA0000000000000000000019 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA000000000000000000001A /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
 		AA000000000000000000001C /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
@@ -91,6 +93,7 @@
 				AA0000000000000000000023 /* BatterySampler.swift */,
 				AA0000000000000000000025 /* DiskSampler.swift */,
 				AA0000000000000000000027 /* MemorySampler.swift */,
+				AA000000000000000000002C /* ChartWindow.swift */,
 				AA0000000000000000000029 /* Tracker.icns */,
 				AA0000000000000000000019 /* Info.plist */,
 			);
@@ -173,6 +176,7 @@
 				AA0000000000000000000024 /* BatterySampler.swift in Sources */,
 				AA0000000000000000000026 /* DiskSampler.swift in Sources */,
 				AA0000000000000000000028 /* MemorySampler.swift in Sources */,
+				AA000000000000000000002D /* ChartWindow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
