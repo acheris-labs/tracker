@@ -1,3 +1,5 @@
+// host_processor_info sampling approach adapted from exelban/stats (MIT).
+
 import Darwin
 import Foundation
 
