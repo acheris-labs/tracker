@@ -24,10 +24,10 @@ struct ChartColors {
         eSys:      NSColor(srgbRed: 0.95, green: 0.55, blue: 0.10, alpha: 1),
         pUser:     NSColor(srgbRed: 0.20, green: 0.85, blue: 0.30, alpha: 1),
         eUser:     NSColor(srgbRed: 0.30, green: 0.62, blue: 1.00, alpha: 1),
-        gpu:       NSColor(srgbRed: 1.00, green: 0.30, blue: 0.85, alpha: 1),
+        gpu:       NSColor(srgbRed: 0.70, green: 0.45, blue: 1.00, alpha: 1),
         memory:    NSColor(srgbRed: 0.92, green: 0.92, blue: 0.92, alpha: 1),
         diskRead:  NSColor(srgbRed: 0.20, green: 0.85, blue: 0.85, alpha: 1),
-        diskWrite: NSColor(srgbRed: 0.85, green: 0.45, blue: 0.95, alpha: 1)
+        diskWrite: NSColor(srgbRed: 1.00, green: 0.85, blue: 0.25, alpha: 1)
     )
 
     private static let keys = (

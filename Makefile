@@ -4,7 +4,8 @@ TARGET      := Tracker
 BUNDLE_ID   := net.acheris.tracker
 CONFIG      ?= Release
 
-XCODEBUILD  := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG)
+DERIVED     := $(CURDIR)/build
+XCODEBUILD  := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) -derivedDataPath $(DERIVED)
 
 .PHONY: build debug run kill rerun clean load history-30 history-180 show-defaults app-path icon
 
