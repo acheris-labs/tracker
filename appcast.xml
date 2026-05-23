@@ -1,0 +1,36 @@
+<?xml version="1.0" standalone="yes"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Tracker</title>
+    <link>https://acheris-labs.github.io/tracker/appcast.xml</link>
+    <description>Updates for Tracker</description>
+    <language>en</language>
+    <item>
+      <title>Tracker 0.2.1</title>
+      <pubDate>Sat, 23 May 2026 20:27:35 +0000</pubDate>
+      <sparkle:version>0.2.1</sparkle:version>
+      <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.2.1</sparkle:releaseNotesLink>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/acheris-labs/tracker/releases/download/v0.2.1/Tracker-0.2.1.dmg" sparkle:edSignature="Sw00ObJcFSpVZCwFyupxLCml9M0lWxcDB1kf2Z3wJET7FhkweQ0nsP58ccx+gysz7rs1cvnRCmXgVCq3RUEQBA==" length="1262189" type="application/octet-stream"/>
+    </item>
+    <item>
+      <title>Tracker 0.2.0</title>
+      <pubDate>Sat, 23 May 2026 13:14:53 +0000</pubDate>
+      <sparkle:version>0.2.0</sparkle:version>
+      <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.2.0</sparkle:releaseNotesLink>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/acheris-labs/tracker/releases/download/v0.2.0/Tracker-0.2.0.dmg" sparkle:edSignature="QEArFRtWBxqf9qKIkNqyy0BQAuWTZbfsGNfAWdCxeSzVnTfCAGcTe1x0AteLZfovQ3kCXJMaCjNODsovGxRLCg==" length="349223" type="application/octet-stream"/>
+    </item>
+    <item>
+      <title>Tracker 0.1.0</title>
+      <pubDate>Tue, 12 May 2026 00:07:08 +0000</pubDate>
+      <sparkle:version>0.1.0</sparkle:version>
+      <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.1.0</sparkle:releaseNotesLink>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/acheris-labs/tracker/releases/download/v0.1.0/Tracker-0.1.0.dmg" sparkle:edSignature="VD1IGF5Idc1B5c76LGSVYdUlc/sPIM7l06bVjj6bFMCyLZ8tGBtz4HCkIyii+6ii+5Xqg2FKDZXZ3UU7eB9UBg==" length="343311" type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>
