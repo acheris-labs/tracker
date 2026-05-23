@@ -15,6 +15,10 @@ jobs:
     runs-on: macos-14
     permissions:
       contents: write
+    env:
+      # Random per-run password for the temporary signing keychain.
+      KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+      NOTARY_PROFILE: tracker-notary
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +49,55 @@ jobs:
           sw_vers
           xcodebuild -version
 
+      # --- Code signing setup ----------------------------------------------
+      # Imports the Developer ID Application certificate from secrets into a
+      # temporary keychain that's discarded at the end of the job.
+      - name: Import signing certificate
+        env:
+          DEVID_CERT_P12:      ${{ secrets.DEVID_CERT_P12 }}
+          DEVID_CERT_PASSWORD: ${{ secrets.DEVID_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${DEVID_CERT_P12:?missing DEVID_CERT_P12 secret}"
+          : "${DEVID_CERT_PASSWORD:?missing DEVID_CERT_PASSWORD secret}"
+
+          CERT_PATH="$RUNNER_TEMP/devid.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+
+          echo "$DEVID_CERT_P12" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" \
+            -P "$DEVID_CERT_PASSWORD" -T /usr/bin/codesign
+          # Put our keychain first in the search list without losing the
+          # system keychain (needed for Apple-trusted roots).
+          OTHERS=$(security list-keychains -d user | sed -e 's/^ *//' -e 's/"//g' | grep -v "$KEYCHAIN_PATH" || true)
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $OTHERS
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          rm -f "$CERT_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Store notarytool credentials
+        env:
+          APPLE_ID:           ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID:      ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${APPLE_ID:?missing APPLE_ID secret}"
+          : "${APPLE_TEAM_ID:?missing APPLE_TEAM_ID secret}"
+          : "${APPLE_APP_PASSWORD:?missing APPLE_APP_PASSWORD secret}"
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+            --apple-id   "$APPLE_ID" \
+            --team-id    "$APPLE_TEAM_ID" \
+            --password   "$APPLE_APP_PASSWORD"
+
+      # --- Build / sign / notarize / DMG -----------------------------------
       - name: Build (Release, versioned from tag)
         run: |
           xcodebuild -project Tracker.xcodeproj \
@@ -54,40 +107,29 @@ jobs:
                      CURRENT_PROJECT_VERSION="$(date +%s)" \
                      build
 
-      - name: Locate built .app
-        id: app
+      - name: Sign, notarize, and build DMG
+        env:
+          DEVID_IDENTITY: ${{ secrets.DEVID_IDENTITY }}
         run: |
-          APP=$(xcodebuild -project Tracker.xcodeproj -scheme Tracker \
-                           -configuration Release -showBuildSettings 2>/dev/null \
-                | awk -F' = ' '/^[ \t]*BUILT_PRODUCTS_DIR/ { print $2 "/Tracker.app"; exit }')
-          echo "path=$APP" >> "$GITHUB_OUTPUT"
-          codesign -dv "$APP" 2>&1
+          set -euo pipefail
+          : "${DEVID_IDENTITY:?missing DEVID_IDENTITY secret}"
+          make dmg SIGN_ID="$DEVID_IDENTITY" NOTARY_PROFILE="$NOTARY_PROFILE"
 
-      - name: Stage app for DMG
-        run: |
-          rm -rf staging
-          mkdir -p staging
-          cp -R "${{ steps.app.outputs.path }}" staging/
-
-      - name: Install create-dmg
-        run: brew install create-dmg
-
-      - name: Build DMG
+      - name: Locate DMG
         id: dmg
         run: |
-          DMG="Tracker-${{ steps.v.outputs.version }}.dmg"
-          create-dmg \
-            --volname "Tracker ${{ steps.v.outputs.version }}" \
-            --window-size 540 360 \
-            --icon-size 96 \
-            --icon "Tracker.app" 140 180 \
-            --hide-extension "Tracker.app" \
-            --app-drop-link 400 180 \
-            "$DMG" \
-            "staging/"
-          ls -la "$DMG"
-          echo "path=$DMG" >> "$GITHUB_OUTPUT"
+          DMG=$(ls build/Tracker*.dmg | head -1)
+          VERSIONED="Tracker-${{ steps.v.outputs.version }}.dmg"
+          mv "$DMG" "$VERSIONED"
+          echo "path=$VERSIONED" >> "$GITHUB_OUTPUT"
+          ls -la "$VERSIONED"
 
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+
+      # --- Release ---------------------------------------------------------
       - name: Create or push tag (workflow_dispatch only)
         if: github.event_name == 'workflow_dispatch'
         run: |
