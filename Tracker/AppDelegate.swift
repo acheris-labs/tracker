@@ -1,12 +1,23 @@
 import AppKit
+import Sparkle
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    // Sparkle update controller; reads SUFeedURL / SUPublicEDKey from
+    // Info.plist and runs scheduled checks per SUEnableAutomaticChecks /
+    // SUScheduledCheckInterval (also in Info.plist).
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil)
     private var timer: Timer?
     private let cpu = CPUSampler()
     private let gpu = GPUSampler()
     private let battery = BatterySampler()
     private let disk = DiskSampler()
     private let memory = MemorySampler()
+    private let processes = ProcessSampler()
+    private var processTickCount: Int = 0
+    private var processIntervalSeconds: Int = 2
     private var renderer: HistoryRenderer!
     private var lastCPU = CPUFrame()
     private var lastGPU: Double = 0
@@ -47,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        processIntervalSeconds = max(1, min(60, Self.intDefault("ProcessRefreshSeconds", default: 2)))
         let raw = UserDefaults.standard.integer(forKey: "HistorySeconds")
         let capacity = raw <= 0 ? 120 : max(15, min(600, raw))
         renderer = HistoryRenderer(capacity: capacity, numP: cpu.numP, numE: cpu.numE,
@@ -82,9 +94,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showChartWindow(_ sender: Any?) {
+        ensureChartWindow()
+        chart?.selectChartTab(nil)
+    }
+
+    @objc func showProcessesTab(_ sender: Any?) {
+        ensureChartWindow()
+        chart?.selectProcessesTab(nil)
+    }
+
+    private func ensureChartWindow() {
+        let wasVisible = chart?.window?.isVisible ?? false
         if chart == nil {
             chart = ChartWindowController(renderer: renderer,
                                           hasBattery: battery.hasBattery)
+            chart?.processList.intervalSeconds = processIntervalSeconds
+            chart?.processList.onIntervalChange = { [weak self] s in
+                self?.applyProcessInterval(s)
+            }
         }
         NSApp.activate()
         chart?.showWindow(nil)
@@ -92,6 +119,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chart?.refresh(cpu: lastCPU, gpu: lastGPU, battery: lastBatteryInfo,
                        memory: lastMemory,
                        diskRead: lastDiskRead, diskWrite: lastDiskWrite)
+        // Populate processes immediately rather than waiting up to a full
+        // refresh interval. Reset the sampler if the window was closed so
+        // CPU% / disk / power don't average over the time we were idle.
+        if !wasVisible { processes.reset() }
+        chart?.processList.setSnapshots(processes.sample())
+        processTickCount = 0
+    }
+
+    private func applyProcessInterval(_ seconds: Int) {
+        let clamped = max(1, min(60, seconds))
+        processIntervalSeconds = clamped
+        processTickCount = 0
+        UserDefaults.standard.set(clamped, forKey: "ProcessRefreshSeconds")
     }
 
     @objc func openActivityMonitor(_ sender: Any?) {
@@ -227,13 +267,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showMemory: renderer.showMemory,
                 showDisk: renderer.showDisk,
                 drainThreshold: Self.intDefault("BadgeThresholdWatts", default: 20),
+                autoUpdate: updaterController.updater.automaticallyChecksForUpdates,
                 onDurationChange: { [weak self] s in self?.applyDuration(s) },
                 onColorsChange: { [weak self] c in self?.applyColors(c) },
                 onShowGPUChange: { [weak self] b in self?.applyShowGPU(b) },
                 onShowBatteryChange: { [weak self] b in self?.applyShowBattery(b) },
                 onShowMemoryChange: { [weak self] b in self?.applyShowMemory(b) },
                 onShowDiskChange: { [weak self] b in self?.applyShowDisk(b) },
-                onThresholdChange: { [weak self] v in self?.applyThreshold(v) }
+                onThresholdChange: { [weak self] v in self?.applyThreshold(v) },
+                onAutoUpdateChange: { [weak self] b in self?.applyAutoUpdate(b) }
             )
         } else {
             prefs?.sync(currentDuration: renderer.capacity)
@@ -250,6 +292,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func intDefault(_ key: String, default fallback: Int) -> Int {
         UserDefaults.standard.object(forKey: key) as? Int ?? fallback
+    }
+
+    private func applyAutoUpdate(_ on: Bool) {
+        updaterController.updater.automaticallyChecksForUpdates = on
+        // Sparkle also reads SUEnableAutomaticChecks from UserDefaults; the
+        // setter above is what's authoritative, but keep the key in sync so
+        // it shows the right state outside the app too.
+        UserDefaults.standard.set(on, forKey: "SUEnableAutomaticChecks")
     }
 
     private func applyThreshold(_ v: Int) {
@@ -355,6 +405,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateDockBadge(bi)
         chart?.refresh(cpu: f, gpu: g, battery: bi, memory: m,
                        diskRead: dr, diskWrite: dw)
+
+        // Only pay the per-process sampling cost when someone is looking,
+        // and only at the user-chosen interval (default 2s).
+        if let win = chart?.window, win.isVisible {
+            processTickCount += 1
+            if processTickCount >= processIntervalSeconds {
+                chart?.processList.setSnapshots(processes.sample())
+                processTickCount = 0
+            }
+        }
     }
 
     private func buildMainMenu() -> NSMenu {
@@ -368,14 +428,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         ))
+        let updateItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updateItem.target = updaterController
+        appMenu.addItem(updateItem)
         appMenu.addItem(.separator())
         let chartItem = NSMenuItem(
-            title: "Show Chart",
+            title: "Chart",
             action: #selector(showChartWindow(_:)),
-            keyEquivalent: "0"
+            keyEquivalent: "1"
         )
         chartItem.target = self
         appMenu.addItem(chartItem)
+        let procItem = NSMenuItem(
+            title: "Processes",
+            action: #selector(showProcessesTab(_:)),
+            keyEquivalent: "2"
+        )
+        procItem.target = self
+        appMenu.addItem(procItem)
         let prefsItem = NSMenuItem(
             title: "Preferences…",
             action: #selector(showPreferences(_:)),

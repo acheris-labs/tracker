@@ -26,5 +26,13 @@
     <string>NSApplication</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>SUFeedURL</key>
+    <string>https://acheris-labs.github.io/tracker/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>eloCHGrDFhhbaTZWkbodvpvwN4bzf9FDJNjSso9/1pA=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
 </dict>
 </plist>

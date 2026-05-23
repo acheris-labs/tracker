@@ -1,5 +1,23 @@
 import AppKit
 
+// MARK: - Tab view with per-tab right-click menus
+
+final class RightClickableTabView: NSTabView {
+    /// Returns the context menu to show when `item` is right-clicked, or nil
+    /// to fall through to default behavior.
+    var contextMenuProvider: ((NSTabViewItem) -> NSMenu?)?
+
+    override func rightMouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let item = tabViewItem(at: point),
+           let menu = contextMenuProvider?(item) {
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+            return
+        }
+        super.rightMouseDown(with: event)
+    }
+}
+
 // MARK: - Chart drawing view
 
 final class ChartView: NSView {
@@ -64,6 +82,8 @@ final class LegendChip: NSView {
 
 final class ChartWindowController: NSWindowController, NSWindowDelegate {
     let chartView: ChartView
+    let processList = ProcessListView()
+    private let tabs = RightClickableTabView()
     private weak var renderer: HistoryRenderer?
     private let hasBattery: Bool
 
@@ -98,17 +118,16 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
         self.chartView = v
 
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 780, height: 520),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 1020, height: 520),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
         win.title = "Tracker"
-        win.titlebarAppearsTransparent = true
         win.titleVisibility = .visible
         win.isReleasedWhenClosed = false
         win.isRestorable = false
         win.isMovableByWindowBackground = true
-        win.minSize = NSSize(width: 560, height: 360)
+        win.minSize = NSSize(width: 800, height: 360)
         win.center()
 
         super.init(window: win)
@@ -199,13 +218,12 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
 
         let axisW: CGFloat = 56
         let pad: CGFloat = 16
-        let titleBarHeight: CGFloat = 28  // approximate; layout bottom-aligns to titlebar via safeAreaInsets
 
         NSLayoutConstraint.activate([
             // Chart card
             chartView.leadingAnchor.constraint(equalTo: bg.leadingAnchor, constant: pad + axisW + 6),
             chartView.trailingAnchor.constraint(equalTo: bg.trailingAnchor, constant: -(pad + axisW + 6)),
-            chartView.topAnchor.constraint(equalTo: bg.topAnchor, constant: pad + titleBarHeight),
+            chartView.topAnchor.constraint(equalTo: bg.topAnchor, constant: pad),
             chartView.bottomAnchor.constraint(equalTo: divider.topAnchor, constant: -pad),
 
             // Left axis tick labels
@@ -242,10 +260,50 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
             ])
         }
 
-        window.contentView = bg
+        // Wrap the chart `bg` in tab 1 and the process list in tab 2.
+        let chartTab = NSTabViewItem(identifier: "chart")
+        chartTab.label = "Chart"
+        chartTab.view = bg
+
+        let procTab = NSTabViewItem(identifier: "processes")
+        procTab.label = "Processes"
+        processList.translatesAutoresizingMaskIntoConstraints = false
+        let procContainer = NSView()
+        procContainer.addSubview(processList)
+        NSLayoutConstraint.activate([
+            processList.topAnchor.constraint(equalTo: procContainer.topAnchor, constant: 4),
+            processList.bottomAnchor.constraint(equalTo: procContainer.bottomAnchor, constant: -4),
+            processList.leadingAnchor.constraint(equalTo: procContainer.leadingAnchor, constant: 4),
+            processList.trailingAnchor.constraint(equalTo: procContainer.trailingAnchor, constant: -4),
+        ])
+        procTab.view = procContainer
+
+        tabs.tabViewType = .topTabsBezelBorder
+        tabs.addTabViewItem(chartTab)
+        tabs.addTabViewItem(procTab)
+        tabs.translatesAutoresizingMaskIntoConstraints = false
+        tabs.contextMenuProvider = { [weak self] item in
+            guard let self, item.identifier as? String == "processes" else { return nil }
+            return self.processList.columnSelectorMenu()
+        }
+
+        let root = NSView()
+        root.addSubview(tabs)
+        NSLayoutConstraint.activate([
+            tabs.topAnchor.constraint(equalTo: root.topAnchor),
+            tabs.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            tabs.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            tabs.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+        ])
+        window.contentView = root
+
         applyCurrentColors()
         updateRightAxis()
     }
+
+    // Menu-driven tab selection (⌘1 / ⌘2 from the app's Window menu).
+    @objc func selectChartTab(_ sender: Any?)     { tabs.selectTabViewItem(at: 0) }
+    @objc func selectProcessesTab(_ sender: Any?) { tabs.selectTabViewItem(at: 1) }
 
     private static func axisLabel(_ s: String, alignment: NSTextAlignment) -> NSTextField {
         let t = NSTextField(labelWithString: s)

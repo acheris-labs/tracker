@@ -9,6 +9,7 @@ final class PreferencesWindowController: NSWindowController {
     private let onShowMemoryChange: (Bool) -> Void
     private let onShowDiskChange: (Bool) -> Void
     private let onThresholdChange: (Int) -> Void
+    private let onAutoUpdateChange: (Bool) -> Void
     private weak var thresholdLabel: NSTextField?
 
     private weak var popup: NSPopUpButton?
@@ -28,13 +29,15 @@ final class PreferencesWindowController: NSWindowController {
          showMemory: Bool,
          showDisk: Bool,
          drainThreshold: Int,
+         autoUpdate: Bool,
          onDurationChange: @escaping (Int) -> Void,
          onColorsChange: @escaping (ChartColors) -> Void,
          onShowGPUChange: @escaping (Bool) -> Void,
          onShowBatteryChange: @escaping (Bool) -> Void,
          onShowMemoryChange: @escaping (Bool) -> Void,
          onShowDiskChange: @escaping (Bool) -> Void,
-         onThresholdChange: @escaping (Int) -> Void) {
+         onThresholdChange: @escaping (Int) -> Void,
+         onAutoUpdateChange: @escaping (Bool) -> Void) {
         self.durations = durations
         self.colors = colors
         self.onDurationChange = onDurationChange
@@ -44,6 +47,7 @@ final class PreferencesWindowController: NSWindowController {
         self.onShowMemoryChange = onShowMemoryChange
         self.onShowDiskChange = onShowDiskChange
         self.onThresholdChange = onThresholdChange
+        self.onAutoUpdateChange = onAutoUpdateChange
         self.initialThreshold = drainThreshold
 
         var rows: [(label: String, keyPath: WritableKeyPath<ChartColors, NSColor>)] = [
@@ -107,6 +111,11 @@ final class PreferencesWindowController: NSWindowController {
                                  target: self, action: #selector(toggleShowDisk(_:)))
         diskCheck.state = showDisk ? .on : .off
         grid.addRow(with: [Self.label(""), diskCheck])
+
+        let autoUpdateCheck = NSButton(checkboxWithTitle: "Check for updates automatically",
+                                       target: self, action: #selector(toggleAutoUpdate(_:)))
+        autoUpdateCheck.state = autoUpdate ? .on : .off
+        grid.addRow(with: [Self.label("Updates:"), autoUpdateCheck])
 
         // Drain alert threshold (W) — slider + value label.
         let slider = NSSlider(value: Double(initialThreshold),
@@ -224,6 +233,10 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func toggleShowDisk(_ sender: NSButton) {
         onShowDiskChange(sender.state == .on)
+    }
+
+    @objc private func toggleAutoUpdate(_ sender: NSButton) {
+        onAutoUpdateChange(sender.state == .on)
     }
 
     @objc private func thresholdChanged(_ sender: NSSlider) {

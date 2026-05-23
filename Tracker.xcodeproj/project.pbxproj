@@ -18,6 +18,9 @@
 		AA0000000000000000000028 /* MemorySampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000027 /* MemorySampler.swift */; };
 		AA000000000000000000002A /* Tracker.icns in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000029 /* Tracker.icns */; };
 		AA000000000000000000002D /* ChartWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002C /* ChartWindow.swift */; };
+		AA000000000000000000002F /* ProcessSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002E /* ProcessSampler.swift */; };
+		AA0000000000000000000031 /* ProcessListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000030 /* ProcessListView.swift */; };
+		AA0000000000000000000034 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000033 /* Sparkle */; };
 		AA000000000000000000001B /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001A /* AppKit.framework */; };
 		AA000000000000000000001D /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001C /* IOKit.framework */; };
 /* End PBXBuildFile section */
@@ -35,6 +38,8 @@
 		AA0000000000000000000027 /* MemorySampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySampler.swift; sourceTree = "<group>"; };
 		AA0000000000000000000029 /* Tracker.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Tracker.icns; sourceTree = "<group>"; };
 		AA000000000000000000002C /* ChartWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartWindow.swift; sourceTree = "<group>"; };
+		AA000000000000000000002E /* ProcessSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessSampler.swift; sourceTree = "<group>"; };
+		AA0000000000000000000030 /* ProcessListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessListView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000019 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA000000000000000000001A /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
 		AA000000000000000000001C /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
@@ -47,6 +52,7 @@
 			files = (
 				AA000000000000000000001B /* AppKit.framework in Frameworks */,
 				AA000000000000000000001D /* IOKit.framework in Frameworks */,
+				AA0000000000000000000034 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -94,6 +100,8 @@
 				AA0000000000000000000025 /* DiskSampler.swift */,
 				AA0000000000000000000027 /* MemorySampler.swift */,
 				AA000000000000000000002C /* ChartWindow.swift */,
+				AA000000000000000000002E /* ProcessSampler.swift */,
+				AA0000000000000000000030 /* ProcessListView.swift */,
 				AA0000000000000000000029 /* Tracker.icns */,
 				AA0000000000000000000019 /* Info.plist */,
 			);
@@ -125,6 +133,9 @@
 			dependencies = (
 			);
 			name = Tracker;
+			packageProductDependencies = (
+				AA0000000000000000000033 /* Sparkle */,
+			);
 			productName = Tracker;
 			productReference = AA0000000000000000000006 /* Tracker.app */;
 			productType = "com.apple.product-type.application";
@@ -153,6 +164,9 @@
 				Base,
 			);
 			mainGroup = AA0000000000000000000002;
+			packageReferences = (
+				AA0000000000000000000032 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			productRefGroup = AA0000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -177,6 +191,8 @@
 				AA0000000000000000000026 /* DiskSampler.swift in Sources */,
 				AA0000000000000000000028 /* MemorySampler.swift in Sources */,
 				AA000000000000000000002D /* ChartWindow.swift in Sources */,
+				AA000000000000000000002F /* ProcessSampler.swift in Sources */,
+				AA0000000000000000000031 /* ProcessListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -310,6 +326,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA0000000000000000000032 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA0000000000000000000033 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0000000000000000000032 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = AA0000000000000000000001 /* Project object */;
 }
