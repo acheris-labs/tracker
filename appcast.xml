@@ -15,15 +15,6 @@
       <enclosure url="https://github.com/acheris-labs/tracker/releases/download/v0.2.4/Tracker-0.2.4.dmg" sparkle:edSignature="UKODy86CB/1zW3ndYM9nTTiOwheke6/8FGzPEuh0X3nYTBb5CJJyARANH6dgsf5tcSOpe9u9cCluapN5wwI3AA==" length="1271693" type="application/octet-stream"/>
     </item>
     <item>
-      <title>Tracker 0.2.3</title>
-      <pubDate>Tue, 16 Jun 2026 19:10:27 +0000</pubDate>
-      <sparkle:version>0</sparkle:version>
-      <sparkle:shortVersionString>0.2.3</sparkle:shortVersionString>
-      <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.2.3</sparkle:releaseNotesLink>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/acheris-labs/tracker/releases/download/v0.2.3/Tracker-0.2.3.dmg" sparkle:edSignature="HftG4d8E9Poh5WvLnRTkWPatuuEwtk2WeknHSksH4FDjh9TK5wRgitU9fro6H607/t2xHtUVRIfVduK9D01cDg==" length="1271712" type="application/octet-stream"/>
-    </item>
-    <item>
       <title>Tracker 0.2.2</title>
       <pubDate>Tue, 16 Jun 2026 16:46:57 +0000</pubDate>
       <sparkle:version>1</sparkle:version>
