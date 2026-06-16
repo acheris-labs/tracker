@@ -134,10 +134,20 @@ icon:
 	@echo "wrote Tracker/Tracker.icns"
 
 # --- Distribution -----------------------------------------------------------
-# Re-sign the built .app with the configured identity. Tracker is a single
-# executable bundle with no nested code, so one codesign on the bundle suffices.
+# Re-sign the built .app with the configured identity. Xcode signs the embedded
+# Sparkle.framework ad-hoc, so we must re-sign it (and its nested code) with our
+# identity *inside-out* before the outer bundle — otherwise a hardened-runtime
+# app and an ad-hoc framework have mismatched Team IDs and macOS library
+# validation kills the app at launch. --preserve-metadata=entitlements keeps
+# Sparkle's bundled XPC/Updater entitlements intact (not ours to recreate).
 sign: build
 	@APP=$$($(MAKE) -s app-path); \
+	SP="$$APP/Contents/Frameworks/Sparkle.framework"; \
+	codesign --force --sign "$(SIGN_ID)" $(HARDENED) --preserve-metadata=entitlements "$$SP/Versions/B/XPCServices/Downloader.xpc"; \
+	codesign --force --sign "$(SIGN_ID)" $(HARDENED) --preserve-metadata=entitlements "$$SP/Versions/B/XPCServices/Installer.xpc"; \
+	codesign --force --sign "$(SIGN_ID)" $(HARDENED) --preserve-metadata=entitlements "$$SP/Versions/B/Autoupdate"; \
+	codesign --force --sign "$(SIGN_ID)" $(HARDENED) --preserve-metadata=entitlements "$$SP/Versions/B/Updater.app"; \
+	codesign --force --sign "$(SIGN_ID)" $(HARDENED) "$$SP"; \
 	codesign --force --sign "$(SIGN_ID)" $(HARDENED) "$$APP"; \
 	codesign --verify --verbose "$$APP"; \
 	echo "signed $$APP  ($(SIGN_ID))"

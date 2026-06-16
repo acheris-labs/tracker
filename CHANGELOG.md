@@ -11,6 +11,17 @@ auto-update prompt.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-06-16
+
+### Fixed
+- **Signed and notarized builds now actually launch.** The embedded
+  `Sparkle.framework` was left ad-hoc-signed while the app itself was
+  Developer ID + hardened runtime, so macOS library validation rejected the
+  mismatched framework and aborted the app at launch — every signed/notarized
+  release was unrunnable (only ad-hoc local builds worked). The build now
+  re-signs Sparkle and its nested code with the app's identity, so it
+  launches and notarization passes.
+
 ### Changed
 - The **About Tracker** panel now matches Newt's: the app icon, version,
   copyright, and an MIT-license / no-warranty note.
@@ -64,7 +75,8 @@ auto-update prompt.
 - Keyboard shortcuts (⌘0 chart, ⌘, preferences, ⌘W close, ⌘H hide, ⌘Q quit).
 - CI build workflow and a tag-driven release workflow.
 
-[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/acheris-labs/tracker/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/acheris-labs/tracker/compare/v0.2.2...v0.2.4
 [0.2.2]: https://github.com/acheris-labs/tracker/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/acheris-labs/tracker/compare/v0.2.0...v0.2.1
