@@ -236,11 +236,21 @@ jobs:
               SIG_BLOB=$("$SIGN_UPDATE" -f "$KEY_FILE" "$DMG_DIR/$DMG_NAME")
               PUB_RFC822=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$PUBLISHED" "+%a, %d %b %Y %H:%M:%S +0000")
 
+              # Sparkle compares <sparkle:version> against the installed app's
+              # CFBundleVersion, so it must be the build's *real* CFBundleVersion
+              # (a monotonic timestamp), not the marketing tag. Read it out of the
+              # DMG we just downloaded; fall back to the tag only if that fails.
+              MNT=$(mktemp -d)
+              hdiutil attach "$DMG_DIR/$DMG_NAME" -nobrowse -readonly -mountpoint "$MNT" -quiet
+              BUILD_VERSION=$(plutil -extract CFBundleVersion raw "$MNT"/*.app/Contents/Info.plist 2>/dev/null || echo "$VERSION")
+              hdiutil detach "$MNT" -quiet || true
+              rmdir "$MNT" 2>/dev/null || true
+
               cat <<EOF
               <item>
                 <title>Tracker ${VERSION}</title>
                 <pubDate>${PUB_RFC822}</pubDate>
-                <sparkle:version>${VERSION}</sparkle:version>
+                <sparkle:version>${BUILD_VERSION}</sparkle:version>
                 <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
                 <sparkle:releaseNotesLink>${NOTES_URL}</sparkle:releaseNotesLink>
                 <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
