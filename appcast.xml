@@ -6,9 +6,18 @@
     <description>Updates for Tracker</description>
     <language>en</language>
     <item>
+      <title>Tracker 0.2.3</title>
+      <pubDate>Tue, 16 Jun 2026 19:10:27 +0000</pubDate>
+      <sparkle:version>0</sparkle:version>
+      <sparkle:shortVersionString>0.2.3</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.2.3</sparkle:releaseNotesLink>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/acheris-labs/tracker/releases/download/v0.2.3/Tracker-0.2.3.dmg" sparkle:edSignature="HftG4d8E9Poh5WvLnRTkWPatuuEwtk2WeknHSksH4FDjh9TK5wRgitU9fro6H607/t2xHtUVRIfVduK9D01cDg==" length="1271712" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Tracker 0.2.2</title>
       <pubDate>Tue, 16 Jun 2026 16:46:57 +0000</pubDate>
-      <sparkle:version>0.2.2</sparkle:version>
+      <sparkle:version>1</sparkle:version>
       <sparkle:shortVersionString>0.2.2</sparkle:shortVersionString>
       <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.2.2</sparkle:releaseNotesLink>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
@@ -17,7 +26,7 @@
     <item>
       <title>Tracker 0.2.1</title>
       <pubDate>Sat, 23 May 2026 20:27:35 +0000</pubDate>
-      <sparkle:version>0.2.1</sparkle:version>
+      <sparkle:version>1</sparkle:version>
       <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
       <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.2.1</sparkle:releaseNotesLink>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
@@ -26,7 +35,7 @@
     <item>
       <title>Tracker 0.2.0</title>
       <pubDate>Sat, 23 May 2026 13:14:53 +0000</pubDate>
-      <sparkle:version>0.2.0</sparkle:version>
+      <sparkle:version>1</sparkle:version>
       <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
       <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.2.0</sparkle:releaseNotesLink>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
@@ -35,7 +44,7 @@
     <item>
       <title>Tracker 0.1.0</title>
       <pubDate>Tue, 12 May 2026 00:07:08 +0000</pubDate>
-      <sparkle:version>0.1.0</sparkle:version>
+      <sparkle:version>1</sparkle:version>
       <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
       <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.1.0</sparkle:releaseNotesLink>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
