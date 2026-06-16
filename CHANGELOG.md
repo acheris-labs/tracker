@@ -11,6 +11,10 @@ auto-update prompt.
 
 ## [Unreleased]
 
+### Changed
+- The **About Tracker** panel now matches Newt's: the app icon, version,
+  copyright, and an MIT-license / no-warranty note.
+
 ## [0.2.4] - 2026-06-16
 
 ### Fixed

@@ -26,6 +26,8 @@
     <string>NSApplication</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 Chris Madden</string>
     <key>SUFeedURL</key>
     <string>https://acheris-labs.github.io/tracker/appcast.xml</string>
     <key>SUPublicEDKey</key>

@@ -140,6 +140,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                            configuration: NSWorkspace.OpenConfiguration())
     }
 
+    /// Standard macOS About panel, styled to match Newt: name, version, and
+    /// copyright (`NSHumanReadableCopyright`) come from the bundle; we supply the
+    /// MIT license + no-warranty note as the credits blurb. The dock icon is a
+    /// live chart (`applicationIconImage` is overwritten every tick), so pass the
+    /// static app icon explicitly — otherwise the panel would show the chart.
+    @objc private func showAbout() {
+        let blurb = "Free software under the MIT License.\n"
+            + "Provided \u{201C}as is\u{201D}, without warranty of any kind, express or implied."
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+        let credits = NSAttributedString(string: blurb, attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: style,
+        ])
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [.credits: credits]
+        if let url = Bundle.main.url(forResource: "Tracker", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            options[.applicationIcon] = icon
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: options)
+    }
+
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         if dockMenu == nil { dockMenu = buildDockMenu() }
         refreshDockMenu()
@@ -423,11 +447,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(appItem)
 
         let appMenu = NSMenu()
-        appMenu.addItem(NSMenuItem(
+        let aboutItem = NSMenuItem(
             title: "About Tracker",
-            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            action: #selector(showAbout),
             keyEquivalent: ""
-        ))
+        )
+        aboutItem.target = self
+        appMenu.addItem(aboutItem)
         let updateItem = NSMenuItem(
             title: "Check for Updates…",
             action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
