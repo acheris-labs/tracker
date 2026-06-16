@@ -102,22 +102,18 @@ jobs:
             --password   "$APPLE_APP_PASSWORD"
 
       # --- Build / sign / notarize / DMG -----------------------------------
-      - name: Build (Release, versioned from tag)
-        run: |
-          xcodebuild -project Tracker.xcodeproj \
-                     -scheme Tracker \
-                     -configuration Release \
-                     MARKETING_VERSION="${{ steps.v.outputs.version }}" \
-                     CURRENT_PROJECT_VERSION="$(date +%s)" \
-                     build
-
-      - name: Sign, notarize, and build DMG
+      # Version flows through `make` so the Makefile's own xcodebuild (the build
+      # that actually ends up in the DMG) stamps it. A separate xcodebuild step
+      # is pointless — `make dmg` rebuilds and would overwrite it with defaults.
+      - name: Build, sign, notarize, DMG (versioned from tag)
         env:
           DEVID_IDENTITY: ${{ secrets.DEVID_IDENTITY }}
         run: |
           set -euo pipefail
           : "${DEVID_IDENTITY:?missing DEVID_IDENTITY secret}"
-          make dmg SIGN_ID="$DEVID_IDENTITY" NOTARY_PROFILE="$NOTARY_PROFILE"
+          make dmg SIGN_ID="$DEVID_IDENTITY" NOTARY_PROFILE="$NOTARY_PROFILE" \
+            MARKETING_VERSION="${{ steps.v.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="$(date +%s)"
 
       - name: Locate DMG
         id: dmg

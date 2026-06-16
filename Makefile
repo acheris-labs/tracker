@@ -4,8 +4,17 @@ TARGET      := Tracker
 BUNDLE_ID   := net.acheris.tracker
 CONFIG      ?= Release
 
+# Version stamping. Info.plist references $(MARKETING_VERSION) /
+# $(CURRENT_PROJECT_VERSION); empty here means the Xcode project defaults
+# (0.0.0 / 0) are used, which keeps local dev builds behind every release so
+# Sparkle always offers an update. CI passes real values through to xcodebuild:
+#   make dmg MARKETING_VERSION=0.2.4 CURRENT_PROJECT_VERSION=$(date +%s) ...
+MARKETING_VERSION       ?=
+CURRENT_PROJECT_VERSION ?=
+VERSION_FLAGS := $(if $(MARKETING_VERSION),MARKETING_VERSION=$(MARKETING_VERSION)) $(if $(CURRENT_PROJECT_VERSION),CURRENT_PROJECT_VERSION=$(CURRENT_PROJECT_VERSION))
+
 DERIVED     := $(CURDIR)/build
-XCODEBUILD  := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) -derivedDataPath $(DERIVED)
+XCODEBUILD  := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) -derivedDataPath $(DERIVED) $(VERSION_FLAGS)
 
 # --- Code signing -----------------------------------------------------------
 # SIGN_ID defaults to ad-hoc ("-"). For a distributable, notarizable build pass
