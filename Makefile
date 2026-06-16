@@ -149,7 +149,9 @@ notarize: sign
 	xcrun stapler validate "$$APP"; \
 	echo "notarized + stapled $$APP"
 
-# Notarized .dmg ready to ship.
+# Notarized .dmg ready to ship. The app inside is already notarized + stapled by
+# the `notarize` dependency; we then sign, notarize, and staple the DMG itself so
+# a directly-downloaded container clears Gatekeeper on mount without a prompt.
 dmg: notarize
 	@command -v create-dmg >/dev/null || brew install create-dmg
 	@APP=$$($(MAKE) -s app-path); \
@@ -163,4 +165,9 @@ dmg: notarize
 	  --hide-extension "$(TARGET).app" \
 	  --app-drop-link 400 180 \
 	  build/$(TARGET).dmg build/staging/; \
-	echo "built build/$(TARGET).dmg"
+	codesign --force --sign "$(SIGN_ID)" --timestamp build/$(TARGET).dmg; \
+	xcrun notarytool submit build/$(TARGET).dmg \
+	  --keychain-profile $(NOTARY_PROFILE) --wait; \
+	xcrun stapler staple build/$(TARGET).dmg; \
+	xcrun stapler validate build/$(TARGET).dmg; \
+	echo "signed + notarized + stapled build/$(TARGET).dmg"
