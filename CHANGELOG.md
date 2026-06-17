@@ -11,13 +11,15 @@ auto-update prompt.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-06-17
+
 ### Added
 - **Activity-Monitor-style process view.** The categories are now top-level
   siblings of Chart — **Chart · CPU · Memory · Energy · Disk** — each with its
   own sortable columns, process icons, and a per-category summary footer
-  (System/User/Idle % with a live CPU-load sparkline and thread/process totals
-  on CPU; memory/energy/disk totals elsewhere). Adds a filter field and a
-  toolbar to Inspect / Quit / Force-Quit the selected process.
+  (System/User/Idle % and thread/process totals on CPU; memory/energy/disk
+  totals elsewhere). Adds a filter field and a toolbar to Inspect / Quit /
+  Force-Quit the selected process.
 - **Energy** columns: **Drain** (% of a full charge per hour at the current
   rate), lifetime **Energy** consumed, and **% Batt** (lifetime energy vs.
   battery capacity); the footer shows the battery charge/discharge rate and
@@ -26,8 +28,10 @@ auto-update prompt.
   live per-second rates.
 
 ### Changed
-- The blown-up **Chart** window draws CPU as a smoothed stacked area and the
+- The blown-up **Chart** view draws CPU as a smoothed stacked area and the
   metric lines as splines; the dock icon keeps its crisp bars.
+- The Chart tab now uses the same dark rounded-panel styling as the category
+  tabs, for a consistent look across tabs.
 
 ### Fixed
 - The battery charge/discharge rate now reflects true flow even on AC — it was
@@ -97,7 +101,8 @@ auto-update prompt.
 - Keyboard shortcuts (⌘0 chart, ⌘, preferences, ⌘W close, ⌘H hide, ⌘Q quit).
 - CI build workflow and a tag-driven release workflow.
 
-[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/acheris-labs/tracker/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/acheris-labs/tracker/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/acheris-labs/tracker/compare/v0.2.2...v0.2.4
 [0.2.2]: https://github.com/acheris-labs/tracker/compare/v0.2.1...v0.2.2

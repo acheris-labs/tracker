@@ -78,7 +78,6 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private let footer = NSView()
     private let footerLeft = NSTextField(labelWithString: "")
     private let footerRight = NSTextField(labelWithString: "")
-    private let sparkline = Sparkline()
 
     private static let tabKey = "ProcessTab"
 
@@ -169,7 +168,6 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
             table.setIndicatorImage(NSImage(systemSymbolName: "chevron.down",
                                             accessibilityDescription: nil), in: col)
         }
-        sparkline.isHidden = (tab != .cpu)
         applyFilterAndSort()
         refreshFooter()
         UserDefaults.standard.set(tab.rawValue, forKey: Self.tabKey)
@@ -185,9 +183,6 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     /// Fed by the app each refresh with system-wide CPU/memory/disk numbers.
     func setSystemStats(_ s: SystemStats) {
         systemStats = s
-        if currentTab == .cpu {
-            sparkline.push((s.cpuUserPct + s.cpuSysPct) / 100.0)
-        }
         refreshFooter()
     }
 
@@ -449,9 +444,6 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         footerRight.translatesAutoresizingMaskIntoConstraints = false
         footer.addSubview(footerRight)
 
-        sparkline.translatesAutoresizingMaskIntoConstraints = false
-        footer.addSubview(sparkline)
-
         NSLayoutConstraint.activate([
             sep.topAnchor.constraint(equalTo: footer.topAnchor),
             sep.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
@@ -462,11 +454,6 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
             footerRight.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -10),
             footerRight.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
-
-            sparkline.trailingAnchor.constraint(equalTo: footerRight.leadingAnchor, constant: -12),
-            sparkline.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
-            sparkline.widthAnchor.constraint(equalToConstant: 110),
-            sparkline.heightAnchor.constraint(equalToConstant: 26),
         ])
     }
 
@@ -833,42 +820,5 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
                 return asc ? r == .orderedAscending : r == .orderedDescending
             }
         }
-    }
-}
-
-/// A tiny filled line chart of recent total CPU load (0…1), for the footer.
-private final class Sparkline: NSView {
-    private var values: [Double] = []
-    private let capacity = 60
-
-    func push(_ v: Double) {
-        values.append(max(0, min(1, v)))
-        if values.count > capacity { values.removeFirst(values.count - capacity) }
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard values.count > 1 else { return }
-        let h = bounds.height
-        let step = bounds.width / CGFloat(capacity - 1)
-
-        let area = NSBezierPath()
-        area.move(to: NSPoint(x: 0, y: 0))
-        for (i, v) in values.enumerated() {
-            area.line(to: NSPoint(x: CGFloat(i) * step, y: CGFloat(v) * h))
-        }
-        area.line(to: NSPoint(x: CGFloat(values.count - 1) * step, y: 0))
-        area.close()
-        NSColor.systemGreen.withAlphaComponent(0.3).setFill()
-        area.fill()
-
-        let line = NSBezierPath()
-        for (i, v) in values.enumerated() {
-            let pt = NSPoint(x: CGFloat(i) * step, y: CGFloat(v) * h)
-            if i == 0 { line.move(to: pt) } else { line.line(to: pt) }
-        }
-        line.lineWidth = 1
-        NSColor.systemGreen.setStroke()
-        line.stroke()
     }
 }

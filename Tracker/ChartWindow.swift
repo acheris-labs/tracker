@@ -154,11 +154,15 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
     // MARK: Layout
 
     private func buildContent(window: NSWindow) {
-        // Vibrant background filling the window (incl. behind titlebar).
-        let bg = NSVisualEffectView()
-        bg.material = .windowBackground
-        bg.blendingMode = .behindWindow
-        bg.state = .followsWindowActiveState
+        // Dark rounded panel matching the process tabs' container, so switching
+        // between Chart and the category tabs feels consistent.
+        let bg = NSView()
+        bg.wantsLayer = true
+        bg.layer?.backgroundColor = NSColor(white: 0.04, alpha: 1).cgColor
+        bg.layer?.cornerRadius = 10
+        bg.layer?.masksToBounds = true
+        bg.layer?.borderWidth = 0.5
+        bg.layer?.borderColor = NSColor.separatorColor.cgColor
 
         // Axis labels
         for s in ["100%", "50%", "0%"] {
@@ -269,7 +273,16 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
         // top selector: Chart · CPU · Memory · Energy · Disk. The process
         // categories are now siblings of Chart rather than nested under it.
         let chartTab = NSTabViewItem(identifier: "chart")
-        chartTab.view = bg
+        bg.translatesAutoresizingMaskIntoConstraints = false
+        let chartContainer = NSView()
+        chartContainer.addSubview(bg)
+        NSLayoutConstraint.activate([
+            bg.topAnchor.constraint(equalTo: chartContainer.topAnchor, constant: 4),
+            bg.bottomAnchor.constraint(equalTo: chartContainer.bottomAnchor, constant: -4),
+            bg.leadingAnchor.constraint(equalTo: chartContainer.leadingAnchor, constant: 4),
+            bg.trailingAnchor.constraint(equalTo: chartContainer.trailingAnchor, constant: -4),
+        ])
+        chartTab.view = chartContainer
 
         let procTab = NSTabViewItem(identifier: "processes")
         processList.translatesAutoresizingMaskIntoConstraints = false
