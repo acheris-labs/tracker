@@ -10,7 +10,14 @@ struct ProcessSnapshot {
     let threads: Int
     let diskReadBytesPerSec: Double
     let diskWriteBytesPerSec: Double
-    let powerWatts: Double   // billed + serviced energy / interval
+    let diskReadTotal: Double   // cumulative bytes read (lifetime)
+    let diskWriteTotal: Double  // cumulative bytes written (lifetime)
+    let powerWatts: Double      // billed + serviced energy / interval
+    let energyJoules: Double    // cumulative billed + serviced energy (lifetime)
+    let cpuTimeSeconds: Double  // cumulative user+system CPU time
+    let idleWakeups: Int        // package idle wake-ups during the interval
+    let isTranslated: Bool      // running under Rosetta → Kind = Intel
+    let execPath: String        // executable path, for the process icon
 }
 
 final class ProcessSampler {
@@ -19,11 +26,16 @@ final class ProcessSampler {
         let diskBytesRead: UInt64
         let diskBytesWritten: UInt64
         let energyNanoJoules: UInt64
+        let idleWkups: UInt64
         let sampleAt: UInt64   // mach_absolute_time
     }
 
     private var prev: [Int32: Prev] = [:]
     private var userCache: [uid_t: String] = [:]
+    // Per-pid identity (fixed for a process's lifetime) — cached to avoid a
+    // syscall every sample; pruned to live PIDs in `sample()`.
+    private var pathCache: [Int32: String] = [:]
+    private var translatedCache: [Int32: Bool] = [:]
     private let timebase: mach_timebase_info_data_t = {
         var info = mach_timebase_info_data_t()
         mach_timebase_info(&info)
@@ -51,8 +63,10 @@ final class ProcessSampler {
             out.append(snap)
         }
 
-        // Drop dead PIDs from the prev cache so it doesn't grow forever.
+        // Drop dead PIDs from the caches so they don't grow forever.
         prev = prev.filter { live.contains($0.key) }
+        pathCache = pathCache.filter { live.contains($0.key) }
+        translatedCache = translatedCache.filter { live.contains($0.key) }
 
         out.sort { $0.cpuPercent > $1.cpuPercent }
         return out
@@ -75,6 +89,7 @@ final class ProcessSampler {
         var rRead: UInt64 = 0
         var rWritten: UInt64 = 0
         var rEnergy: UInt64 = 0
+        var rIdle: UInt64 = 0
         let ruOK = withUnsafeMutablePointer(to: &ru) { ptr -> Bool in
             ptr.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { rptr in
                 proc_pid_rusage(pid, RUSAGE_INFO_V6, rptr) == 0
@@ -84,12 +99,14 @@ final class ProcessSampler {
             rRead = ru.ri_diskio_bytesread
             rWritten = ru.ri_diskio_byteswritten
             rEnergy = ru.ri_billed_energy &+ ru.ri_serviced_energy
+            rIdle = ru.ri_pkg_idle_wkups
         }
 
         let cpuPercent: Double
         let diskReadPerSec: Double
         let diskWritePerSec: Double
         let powerWatts: Double
+        let idleWakeups: Int
         if let p = prev[pid] {
             let deltaCPU = totalNanos &- p.cpuNanos
             let deltaWallNanos = machTicksToNanos(now &- p.sampleAt)
@@ -107,15 +124,18 @@ final class ProcessSampler {
                 diskWritePerSec = 0
                 powerWatts = 0
             }
+            idleWakeups = Int(rIdle &- p.idleWkups)   // count over the interval
         } else {
             cpuPercent = 0          // first sample: no baseline yet
             diskReadPerSec = 0
             diskWritePerSec = 0
             powerWatts = 0
+            idleWakeups = 0
         }
         prev[pid] = Prev(cpuNanos: totalNanos,
                          diskBytesRead: rRead, diskBytesWritten: rWritten,
                          energyNanoJoules: rEnergy,
+                         idleWkups: rIdle,
                          sampleAt: now)
 
         var bsd = proc_bsdinfo()
@@ -129,13 +149,48 @@ final class ProcessSampler {
         let user = username(uid: uid)
         let rssMB = Double(taskInfo.pti_resident_size) / (1024 * 1024)
         let threads = Int(taskInfo.pti_threadnum)
+        let cpuTimeSeconds = Double(totalNanos) / 1_000_000_000.0
+        let energyJoules = Double(rEnergy) / 1_000_000_000.0  // nanojoules → joules
 
         return ProcessSnapshot(pid: pid, name: name, user: user,
                                cpuPercent: cpuPercent, rssMB: rssMB,
                                threads: threads,
                                diskReadBytesPerSec: diskReadPerSec,
                                diskWriteBytesPerSec: diskWritePerSec,
-                               powerWatts: powerWatts)
+                               diskReadTotal: Double(rRead),
+                               diskWriteTotal: Double(rWritten),
+                               powerWatts: powerWatts,
+                               energyJoules: energyJoules,
+                               cpuTimeSeconds: cpuTimeSeconds,
+                               idleWakeups: idleWakeups,
+                               isTranslated: translated(pid: pid),
+                               execPath: path(pid: pid))
+    }
+
+    /// Executable path, cached for the pid's lifetime (used for the icon).
+    private func path(pid: Int32) -> String {
+        if let c = pathCache[pid] { return c }
+        // proc_pidpath wants a PROC_PIDPATHINFO_MAXSIZE (= 4*MAXPATHLEN) buffer;
+        // that macro isn't imported into Swift, so size from MAXPATHLEN directly.
+        var buf = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let n = proc_pidpath(pid, &buf, UInt32(buf.count))
+        let p = n > 0 ? String(cString: buf) : ""
+        pathCache[pid] = p
+        return p
+    }
+
+    /// Whether the process runs under Rosetta (Kind = Intel). Cached; the
+    /// translation status is fixed for a process's lifetime. P_TRANSLATED
+    /// (0x20000) isn't surfaced as a Swift constant, so it's inlined.
+    private func translated(pid: Int32) -> Bool {
+        if let c = translatedCache[pid] { return c }
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        let rc = sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0)
+        let result = rc == 0 && (info.kp_proc.p_flag & 0x20000) != 0
+        translatedCache[pid] = result
+        return result
     }
 
     private func listAllPIDs() -> [Int32] {

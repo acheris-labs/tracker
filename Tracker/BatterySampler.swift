@@ -9,6 +9,7 @@ struct BatteryInfo {
     let externalConnected: Bool  // AC adapter present
     let minutesToFull: Int?      // nil unless actively charging with a known ETA
     let minutesToEmpty: Int?     // nil unless on battery with a known ETA
+    let capacityWh: Double       // full (max) capacity in watt-hours; 0 if unknown
 }
 
 final class BatterySampler {
@@ -57,8 +58,11 @@ final class BatterySampler {
         // sign from IsCharging / discharging.
         let ampRaw = (dict["InstantAmperage"] as? Int) ?? (dict["Amperage"] as? Int) ?? 0
         let voltRaw = (dict["Voltage"] as? Int) ?? 0
-        let watts = Double(abs(ampRaw)) * Double(voltRaw) / 1_000_000.0
-        let signed: Double = isCharging ? watts : (extConnected ? 0 : -watts)
+        let mag = Double(abs(ampRaw)) * Double(voltRaw) / 1_000_000.0
+        // True flow direction: charging is positive, otherwise the battery is
+        // draining — which DOES happen on AC when the load exceeds the adapter.
+        // When genuinely holding on AC the magnitude is ~0, so it reads as idle.
+        let signed: Double = isCharging ? mag : -mag
 
         // AvgTimeTo* are reported in minutes. 0 or 65535 mean "calculating /
         // not applicable" — surface those as nil. Only populate the half
@@ -69,12 +73,17 @@ final class BatterySampler {
         }
         let f = valid(dict["AvgTimeToFull"] as? Int)
         let e = valid(dict["AvgTimeToEmpty"] as? Int)
+        // Empty-ETA applies whenever draining (incl. on AC), not just unplugged.
         let mFull  = isCharging ? f : nil
-        let mEmpty = (!extConnected) ? e : nil
+        let mEmpty = isCharging ? nil : e
+
+        // Full capacity (Wh) = max capacity (mAh) × voltage (mV) / 1e6.
+        let capacityWh = Double(mx) * Double(voltRaw) / 1_000_000.0
 
         return BatteryInfo(percent: pct, watts: signed,
                            isCharging: isCharging, externalConnected: extConnected,
-                           minutesToFull: mFull, minutesToEmpty: mEmpty)
+                           minutesToFull: mFull, minutesToEmpty: mEmpty,
+                           capacityWh: capacityWh)
     }
 
     // MARK: - IOPS fallback (percent only)
@@ -103,7 +112,8 @@ final class BatterySampler {
                                    isCharging: isCharging,
                                    externalConnected: extConnected,
                                    minutesToFull: isCharging ? f : nil,
-                                   minutesToEmpty: extConnected ? nil : e)
+                                   minutesToEmpty: extConnected ? nil : e,
+                                   capacityWh: 0)
             }
         }
         return nil

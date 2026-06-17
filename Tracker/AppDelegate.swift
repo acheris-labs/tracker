@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastGPU: Double = 0
     private var lastBatteryInfo = BatteryInfo(
         percent: 0, watts: 0, isCharging: false, externalConnected: false,
-        minutesToFull: nil, minutesToEmpty: nil
+        minutesToFull: nil, minutesToEmpty: nil, capacityWh: 0
     )
     private var lastMemory: Double = 0
     private var lastDiskRead: Double = 0
@@ -124,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // CPU% / disk / power don't average over the time we were idle.
         if !wasVisible { processes.reset() }
         chart?.processList.setSnapshots(processes.sample())
+        pushSystemStats()
         processTickCount = 0
     }
 
@@ -433,12 +434,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Only pay the per-process sampling cost when someone is looking,
         // and only at the user-chosen interval (default 2s).
         if let win = chart?.window, win.isVisible {
+            pushSystemStats()
             processTickCount += 1
             if processTickCount >= processIntervalSeconds {
                 chart?.processList.setSnapshots(processes.sample())
                 processTickCount = 0
             }
         }
+    }
+
+    /// Feed the process view's footer with system-wide CPU / memory / disk
+    /// numbers. CPUFrame's per-group fractions are weighted by core counts to
+    /// get system-wide user / system percentages.
+    private func pushSystemStats() {
+        let cores = Double(cpu.numP + cpu.numE)
+        let user = cores > 0
+            ? (lastCPU.pUser * Double(cpu.numP) + lastCPU.eUser * Double(cpu.numE)) / cores * 100
+            : 0
+        let sys = cores > 0
+            ? (lastCPU.pSys * Double(cpu.numP) + lastCPU.eSys * Double(cpu.numE)) / cores * 100
+            : 0
+        let b = lastBatteryInfo
+        chart?.processList.setSystemStats(.init(
+            cpuUserPct: user, cpuSysPct: sys,
+            memoryUsedPct: lastMemory * 100,
+            diskReadPerSec: lastDiskRead, diskWritePerSec: lastDiskWrite,
+            hasBattery: battery.hasBattery,
+            batteryPercent: b.percent, batteryWatts: abs(b.watts),
+            batteryCharging: b.isCharging, batteryExternal: b.externalConnected,
+            batteryMinutesToFull: b.minutesToFull,
+            batteryMinutesToEmpty: b.minutesToEmpty,
+            batteryCapacityWh: b.capacityWh))
     }
 
     private func buildMainMenu() -> NSMenu {

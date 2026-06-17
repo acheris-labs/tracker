@@ -28,7 +28,9 @@ final class ChartView: NSView {
     override var wantsUpdateLayer: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
-        renderer?.draw(in: bounds)
+        // The blown-up chart uses smoothed splines / stacked areas; the dock
+        // icon keeps the crisp bars (renderer.render()).
+        renderer?.draw(in: bounds, smoothed: true)
     }
 }
 
@@ -84,6 +86,9 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
     let chartView: ChartView
     let processList = ProcessListView()
     private let tabs = RightClickableTabView()
+    private let selector = NSSegmentedControl(
+        labels: ["Chart", "CPU", "Memory", "Energy", "Disk"],
+        trackingMode: .selectOne, target: nil, action: nil)
     private weak var renderer: HistoryRenderer?
     private let hasBattery: Bool
 
@@ -260,13 +265,13 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
             ])
         }
 
-        // Wrap the chart `bg` in tab 1 and the process list in tab 2.
+        // Two tabless container views (chart, process list) switched by a single
+        // top selector: Chart · CPU · Memory · Energy · Disk. The process
+        // categories are now siblings of Chart rather than nested under it.
         let chartTab = NSTabViewItem(identifier: "chart")
-        chartTab.label = "Chart"
         chartTab.view = bg
 
         let procTab = NSTabViewItem(identifier: "processes")
-        procTab.label = "Processes"
         processList.translatesAutoresizingMaskIntoConstraints = false
         let procContainer = NSView()
         procContainer.addSubview(processList)
@@ -278,32 +283,53 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
         ])
         procTab.view = procContainer
 
-        tabs.tabViewType = .topTabsBezelBorder
+        tabs.tabViewType = .noTabsNoBorder
         tabs.addTabViewItem(chartTab)
         tabs.addTabViewItem(procTab)
         tabs.translatesAutoresizingMaskIntoConstraints = false
-        tabs.contextMenuProvider = { [weak self] item in
-            guard let self, item.identifier as? String == "processes" else { return nil }
-            return self.processList.columnSelectorMenu()
-        }
+
+        selector.segmentStyle = .texturedRounded
+        selector.target = self
+        selector.action = #selector(selectorChanged(_:))
+        selector.translatesAutoresizingMaskIntoConstraints = false
 
         let root = NSView()
+        root.addSubview(selector)
         root.addSubview(tabs)
         NSLayoutConstraint.activate([
-            tabs.topAnchor.constraint(equalTo: root.topAnchor),
+            selector.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
+            selector.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            tabs.topAnchor.constraint(equalTo: selector.bottomAnchor, constant: 6),
             tabs.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             tabs.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             tabs.trailingAnchor.constraint(equalTo: root.trailingAnchor),
         ])
         window.contentView = root
+        applySelection(0)
 
         applyCurrentColors()
         updateRightAxis()
     }
 
-    // Menu-driven tab selection (⌘1 / ⌘2 from the app's Window menu).
-    @objc func selectChartTab(_ sender: Any?)     { tabs.selectTabViewItem(at: 0) }
-    @objc func selectProcessesTab(_ sender: Any?) { tabs.selectTabViewItem(at: 1) }
+    // Menu-driven selection (⌘1 / ⌘2 from the app's Window menu).
+    @objc func selectChartTab(_ sender: Any?)     { applySelection(0) }   // Chart
+    @objc func selectProcessesTab(_ sender: Any?) { applySelection(1) }   // CPU category
+
+    @objc private func selectorChanged(_ s: NSSegmentedControl) {
+        applySelection(s.selectedSegment)
+    }
+
+    /// 0 = Chart; 1…4 = process categories (CPU/Memory/Energy/Disk).
+    private func applySelection(_ index: Int) {
+        let i = max(0, index)
+        selector.selectedSegment = i
+        if i == 0 {
+            tabs.selectTabViewItem(at: 0)
+        } else {
+            tabs.selectTabViewItem(at: 1)
+            if let t = ProcessListView.Tab(rawValue: i - 1) { processList.showCategory(t) }
+        }
+    }
 
     private static func axisLabel(_ s: String, alignment: NSTextAlignment) -> NSTextField {
         let t = NSTextField(labelWithString: s)

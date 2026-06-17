@@ -185,7 +185,7 @@ final class HistoryRenderer {
         return image
     }
 
-    func draw(in rect: NSRect) {
+    func draw(in rect: NSRect, smoothed: Bool = false) {
         let bg = NSColor(white: 0.04, alpha: 1)
         bg.setFill()
         rect.fill()
@@ -223,7 +223,7 @@ final class HistoryRenderer {
             if showMemory {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
-                         color: colors.memory) { $0.memory }
+                         color: colors.memory, smoothed: smoothed) { $0.memory }
             }
             if showDisk {
                 // Independent auto-scale across read+write, floor 1 MiB/s.
@@ -235,45 +235,51 @@ final class HistoryRenderer {
                 }
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
-                         color: colors.diskRead, lineWidth: 1.25) {
+                         color: colors.diskRead, lineWidth: 1.25, smoothed: smoothed) {
                     min(1.0, $0.diskRead / maxIO)
                 }
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
-                         color: colors.diskWrite, lineWidth: 1.25) {
+                         color: colors.diskWrite, lineWidth: 1.25, smoothed: smoothed) {
                     min(1.0, $0.diskWrite / maxIO)
                 }
             }
         }
 
-        for i in 0..<visible {
-            let f = frames[visibleIndex(i)]
-            let x = inner.minX + xOffset + CGFloat(i) * colW
+        if smoothed {
+            drawCPUArea(visible: visible, xOffset: xOffset, colW: colW,
+                        baseY: inner.minY, cpuH: cpuH,
+                        colors: [pSysColor, eSysColor, pUsrColor, eUsrColor])
+        } else {
+            for i in 0..<visible {
+                let f = frames[visibleIndex(i)]
+                let x = inner.minX + xOffset + CGFloat(i) * colW
 
-            let pSys = CGFloat(f.cpu.pSys * pWeight) * cpuH
-            let eSys = CGFloat(f.cpu.eSys * eWeight) * cpuH
-            let pUsr = CGFloat(f.cpu.pUser * pWeight) * cpuH
-            let eUsr = CGFloat(f.cpu.eUser * eWeight) * cpuH
+                let pSys = CGFloat(f.cpu.pSys * pWeight) * cpuH
+                let eSys = CGFloat(f.cpu.eSys * eWeight) * cpuH
+                let pUsr = CGFloat(f.cpu.pUser * pWeight) * cpuH
+                let eUsr = CGFloat(f.cpu.eUser * eWeight) * cpuH
 
-            var y = inner.minY
-            pSysColor.setFill()
-            NSRect(x: x, y: y, width: colW, height: pSys).fill()
-            y += pSys
-            eSysColor.setFill()
-            NSRect(x: x, y: y, width: colW, height: eSys).fill()
-            y += eSys
-            pUsrColor.setFill()
-            NSRect(x: x, y: y, width: colW, height: pUsr).fill()
-            y += pUsr
-            eUsrColor.setFill()
-            NSRect(x: x, y: y, width: colW, height: eUsr).fill()
+                var y = inner.minY
+                pSysColor.setFill()
+                NSRect(x: x, y: y, width: colW, height: pSys).fill()
+                y += pSys
+                eSysColor.setFill()
+                NSRect(x: x, y: y, width: colW, height: eSys).fill()
+                y += eSys
+                pUsrColor.setFill()
+                NSRect(x: x, y: y, width: colW, height: pUsr).fill()
+                y += pUsr
+                eUsrColor.setFill()
+                NSRect(x: x, y: y, width: colW, height: eUsr).fill()
+            }
         }
 
-        // GPU sits above the CPU bars so it's always visible.
+        // GPU sits above the CPU bars/area so it's always visible.
         if visible > 1, showGPU {
             drawLine(visible: visible, xOffset: xOffset, colW: colW,
                      bandY: inner.minY, bandH: cpuH,
-                     color: colors.gpu) { $0.gpu }
+                     color: colors.gpu, smoothed: smoothed) { $0.gpu }
         }
 
         NSGraphicsContext.current?.cgContext.restoreGState()
@@ -281,32 +287,94 @@ final class HistoryRenderer {
 
     private func drawLine(visible: Int, xOffset: CGFloat, colW: CGFloat,
                           bandY: CGFloat, bandH: CGFloat, color: NSColor,
-                          lineWidth: CGFloat = 2.5,
+                          lineWidth: CGFloat = 2.5, smoothed: Bool = false,
                           value: (HistoryFrame) -> Double) {
-        // Skip individual zero-ish datapoints, breaking the line into
-        // segments. Idle stretches leave a gap rather than a baseline line.
-        let path = NSBezierPath()
-        path.lineWidth = lineWidth
-        path.lineJoinStyle = .round
-        path.lineCapStyle = .round
-        var inSegment = false
+        // Split into contiguous non-zero segments; idle stretches leave a gap
+        // rather than a baseline line.
+        var segments: [[NSPoint]] = []
+        var cur: [NSPoint] = []
         for i in 0..<visible {
             let v = value(frames[visibleIndex(i)])
             if v <= 0.001 {
-                inSegment = false
+                if !cur.isEmpty { segments.append(cur); cur = [] }
                 continue
             }
             let x = xOffset + CGFloat(i) * colW + colW / 2
             let y = bandY + CGFloat(v) * bandH
-            let p = NSPoint(x: x, y: y)
-            if inSegment {
-                path.line(to: p)
-            } else {
-                path.move(to: p)
-                inSegment = true
-            }
+            cur.append(NSPoint(x: x, y: y))
         }
+        if !cur.isEmpty { segments.append(cur) }
+
         color.setStroke()
-        path.stroke()
+        for seg in segments {
+            let path = smoothed ? Self.smoothPath(seg) : Self.straightPath(seg)
+            path.lineWidth = lineWidth
+            path.lineJoinStyle = .round
+            path.lineCapStyle = .round
+            path.stroke()
+        }
+    }
+
+    /// Filled, smoothed stacked CPU area. Cumulative top boundaries are painted
+    /// back-to-front (top of the stack first), each filled down to the baseline,
+    /// so the visible bands read pSys → eSys → pUser → eUser bottom-to-top.
+    private func drawCPUArea(visible: Int, xOffset: CGFloat, colW: CGFloat,
+                             baseY: CGFloat, cpuH: CGFloat, colors bandColors: [NSColor]) {
+        guard visible > 1 else { return }
+        var tops = [[NSPoint]](repeating: [], count: 5)  // tops[k] = top after k bands
+        for i in 0..<visible {
+            let f = frames[visibleIndex(i)]
+            let x = xOffset + CGFloat(i) * colW + colW / 2
+            let y1 = baseY + CGFloat(f.cpu.pSys  * pWeight) * cpuH
+            let y2 = y1   + CGFloat(f.cpu.eSys  * eWeight) * cpuH
+            let y3 = y2   + CGFloat(f.cpu.pUser * pWeight) * cpuH
+            let y4 = y3   + CGFloat(f.cpu.eUser * eWeight) * cpuH
+            tops[1].append(NSPoint(x: x, y: y1))
+            tops[2].append(NSPoint(x: x, y: y2))
+            tops[3].append(NSPoint(x: x, y: y3))
+            tops[4].append(NSPoint(x: x, y: y4))
+        }
+        for k in stride(from: 4, through: 1, by: -1) {
+            let pts = tops[k]
+            let path = Self.smoothPath(pts)
+            path.line(to: NSPoint(x: pts.last!.x,  y: baseY))
+            path.line(to: NSPoint(x: pts.first!.x, y: baseY))
+            path.close()
+            bandColors[k - 1].setFill()
+            path.fill()
+        }
+    }
+
+    private static func straightPath(_ pts: [NSPoint]) -> NSBezierPath {
+        let path = NSBezierPath()
+        for (i, p) in pts.enumerated() {
+            if i == 0 { path.move(to: p) } else { path.line(to: p) }
+        }
+        return path
+    }
+
+    /// Catmull-Rom spline through the points, expressed as cubic bezier curves.
+    private static func smoothPath(_ pts: [NSPoint]) -> NSBezierPath {
+        let path = NSBezierPath()
+        guard pts.count > 1 else {
+            if let p = pts.first { path.move(to: p) }
+            return path
+        }
+        if pts.count == 2 {
+            path.move(to: pts[0]); path.line(to: pts[1]); return path
+        }
+        path.move(to: pts[0])
+        for i in 0..<(pts.count - 1) {
+            let p0 = pts[max(i - 1, 0)]
+            let p1 = pts[i]
+            let p2 = pts[i + 1]
+            let p3 = pts[min(i + 2, pts.count - 1)]
+            let c1 = NSPoint(x: p1.x + (p2.x - p0.x) / 6.0,
+                             y: p1.y + (p2.y - p0.y) / 6.0)
+            let c2 = NSPoint(x: p2.x - (p3.x - p1.x) / 6.0,
+                             y: p2.y - (p3.y - p1.y) / 6.0)
+            path.curve(to: p2, controlPoint1: c1, controlPoint2: c2)
+        }
+        return path
     }
 }

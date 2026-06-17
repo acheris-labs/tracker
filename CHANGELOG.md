@@ -11,6 +11,28 @@ auto-update prompt.
 
 ## [Unreleased]
 
+### Added
+- **Activity-Monitor-style process view.** The categories are now top-level
+  siblings of Chart — **Chart · CPU · Memory · Energy · Disk** — each with its
+  own sortable columns, process icons, and a per-category summary footer
+  (System/User/Idle % with a live CPU-load sparkline and thread/process totals
+  on CPU; memory/energy/disk totals elsewhere). Adds a filter field and a
+  toolbar to Inspect / Quit / Force-Quit the selected process.
+- **Energy** columns: **Drain** (% of a full charge per hour at the current
+  rate), lifetime **Energy** consumed, and **% Batt** (lifetime energy vs.
+  battery capacity); the footer shows the battery charge/discharge rate and
+  time-to-full / time-to-empty.
+- **Disk** columns: cumulative **Bytes Written / Bytes Read** alongside the
+  live per-second rates.
+
+### Changed
+- The blown-up **Chart** window draws CPU as a smoothed stacked area and the
+  metric lines as splines; the dock icon keeps its crisp bars.
+
+### Fixed
+- The battery charge/discharge rate now reflects true flow even on AC — it was
+  previously forced to zero whenever plugged in, hiding on-AC discharge.
+
 ## [0.2.5] - 2026-06-16
 
 ### Fixed
