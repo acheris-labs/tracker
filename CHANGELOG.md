@@ -11,6 +11,15 @@ auto-update prompt.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-07-24
+
+### Changed
+- **Translucent Chart rendering.** The stacked CPU areas are now drawn as
+  translucent gradient bands with a bright edge along each boundary, and the
+  GPU trace moves behind them with a soft glow beneath its line — so GPU stays
+  readable through the stack instead of being hidden by it. The menu-bar icon
+  is unchanged.
+
 ## [0.2.6] - 2026-06-17
 
 ### Added
@@ -101,7 +110,8 @@ auto-update prompt.
 - Keyboard shortcuts (⌘0 chart, ⌘, preferences, ⌘W close, ⌘H hide, ⌘Q quit).
 - CI build workflow and a tag-driven release workflow.
 
-[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/acheris-labs/tracker/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/acheris-labs/tracker/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/acheris-labs/tracker/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/acheris-labs/tracker/compare/v0.2.2...v0.2.4

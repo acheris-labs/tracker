@@ -75,6 +75,16 @@ extension NSColor {
         return String(format: "#%02X%02X%02X", r, g, b)
     }
 
+    /// Nudge a colour toward white. Translucent fills over the near-black
+    /// background read darker than the opaque original, so the palette gets
+    /// lifted before it's drawn with alpha.
+    func lifted(by amount: CGFloat) -> NSColor {
+        guard let c = usingColorSpace(.sRGB) else { return self }
+        func f(_ v: CGFloat) -> CGFloat { min(1, v + (1 - v) * amount) }
+        return NSColor(srgbRed: f(c.redComponent), green: f(c.greenComponent),
+                       blue: f(c.blueComponent), alpha: c.alphaComponent)
+    }
+
     static func fromHex(_ s: String) -> NSColor? {
         var t = s
         if t.hasPrefix("#") { t.removeFirst() }
@@ -100,6 +110,16 @@ final class HistoryRenderer {
 
     private let pointSize = NSSize(width: 128, height: 128)
     private let pixelScale: CGFloat = 2
+
+    // Translucency tuning for the smoothed (Chart window) rendering. The
+    // menu-bar image stays opaque — at 128px alpha just reads as mud.
+    private static let bandAlphaTop: CGFloat = 0.80     // alpha at a band's top edge
+    private static let bandAlphaBottom: CGFloat = 0.30  // alpha at its bottom edge
+    private static let bandLift: CGFloat = 0.15         // brightness compensation
+    private static let bandEdgeWidth: CGFloat = 1.25
+    private static let gpuGlowDepth: CGFloat = 0.18     // glow depth, fraction of chart height
+    private static let gpuGlowPeak: CGFloat = 0.42      // glow alpha immediately under the line
+    private static let gpuGlowLayers = 16
 
     private let pWeight: Double
     private let eWeight: Double
@@ -218,7 +238,9 @@ final class HistoryRenderer {
         let xOffset = W - CGFloat(visible) * colW
 
         // Lines drawn BEFORE bars (memory, disk) sit behind the CPU stack.
-        // GPU is drawn AFTER bars so it stays visible at high CPU load.
+        // GPU: behind the translucent stack in the smoothed chart (it shows
+        // through), on top in the opaque menu-bar image so it stays visible
+        // at high CPU load.
         if visible > 1 {
             if showMemory {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
@@ -244,6 +266,13 @@ final class HistoryRenderer {
                     min(1.0, $0.diskWrite / maxIO)
                 }
             }
+        }
+
+        if visible > 1, showGPU, smoothed {
+            drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                     bandY: inner.minY, bandH: cpuH,
+                     color: colors.gpu, smoothed: true,
+                     glowDepth: Self.gpuGlowDepth) { $0.gpu }
         }
 
         if smoothed {
@@ -275,11 +304,10 @@ final class HistoryRenderer {
             }
         }
 
-        // GPU sits above the CPU bars/area so it's always visible.
-        if visible > 1, showGPU {
+        if visible > 1, showGPU, !smoothed {
             drawLine(visible: visible, xOffset: xOffset, colW: colW,
                      bandY: inner.minY, bandH: cpuH,
-                     color: colors.gpu, smoothed: smoothed) { $0.gpu }
+                     color: colors.gpu, smoothed: false) { $0.gpu }
         }
 
         NSGraphicsContext.current?.cgContext.restoreGState()
@@ -288,6 +316,7 @@ final class HistoryRenderer {
     private func drawLine(visible: Int, xOffset: CGFloat, colW: CGFloat,
                           bandY: CGFloat, bandH: CGFloat, color: NSColor,
                           lineWidth: CGFloat = 2.5, smoothed: Bool = false,
+                          glowDepth: CGFloat = 0,
                           value: (HistoryFrame) -> Double) {
         // Split into contiguous non-zero segments; idle stretches leave a gap
         // rather than a baseline line.
@@ -305,9 +334,13 @@ final class HistoryRenderer {
         }
         if !cur.isEmpty { segments.append(cur) }
 
-        color.setStroke()
         for seg in segments {
             let path = smoothed ? Self.smoothPath(seg) : Self.straightPath(seg)
+            if glowDepth > 0, seg.count > 1 {
+                Self.drawGlow(under: path, points: seg, baseY: bandY,
+                              depth: bandH * glowDepth, color: color)
+            }
+            color.setStroke()
             path.lineWidth = lineWidth
             path.lineJoinStyle = .round
             path.lineCapStyle = .round
@@ -315,9 +348,11 @@ final class HistoryRenderer {
         }
     }
 
-    /// Filled, smoothed stacked CPU area. Cumulative top boundaries are painted
-    /// back-to-front (top of the stack first), each filled down to the baseline,
-    /// so the visible bands read pSys → eSys → pUser → eUser bottom-to-top.
+    /// Filled, smoothed stacked CPU area, drawn translucent so the GPU trace
+    /// behind it shows through. Each band is a ribbon between its own lower and
+    /// upper cumulative boundary — NOT filled down to the baseline — because
+    /// overlapping translucent fills would composite and muddy every colour.
+    /// A brighter opaque stroke along each top edge keeps thin bands legible.
     private func drawCPUArea(visible: Int, xOffset: CGFloat, colW: CGFloat,
                              baseY: CGFloat, cpuH: CGFloat, colors bandColors: [NSColor]) {
         guard visible > 1 else { return }
@@ -329,20 +364,80 @@ final class HistoryRenderer {
             let y2 = y1   + CGFloat(f.cpu.eSys  * eWeight) * cpuH
             let y3 = y2   + CGFloat(f.cpu.pUser * pWeight) * cpuH
             let y4 = y3   + CGFloat(f.cpu.eUser * eWeight) * cpuH
+            tops[0].append(NSPoint(x: x, y: baseY))
             tops[1].append(NSPoint(x: x, y: y1))
             tops[2].append(NSPoint(x: x, y: y2))
             tops[3].append(NSPoint(x: x, y: y3))
             tops[4].append(NSPoint(x: x, y: y4))
         }
-        for k in stride(from: 4, through: 1, by: -1) {
-            let pts = tops[k]
-            let path = Self.smoothPath(pts)
-            path.line(to: NSPoint(x: pts.last!.x,  y: baseY))
-            path.line(to: NSPoint(x: pts.first!.x, y: baseY))
-            path.close()
-            bandColors[k - 1].setFill()
-            path.fill()
+        for k in 1...4 {
+            let c = bandColors[k - 1].lifted(by: Self.bandLift)
+            Self.fillVertical(Self.ribbon(upper: tops[k], lower: tops[k - 1]),
+                              top: c.withAlphaComponent(Self.bandAlphaTop),
+                              bottom: c.withAlphaComponent(Self.bandAlphaBottom))
+            let edge = Self.smoothPath(tops[k])
+            c.setStroke()
+            edge.lineWidth = Self.bandEdgeWidth
+            edge.lineJoinStyle = .round
+            edge.stroke()
         }
+    }
+
+    /// Closed path bounded above by `upper` and below by `lower`.
+    private static func ribbon(upper: [NSPoint], lower: [NSPoint]) -> NSBezierPath {
+        guard let lastLower = lower.last else { return smoothPath(upper) }
+        let path = smoothPath(upper)
+        path.line(to: lastLower)
+        path.append(smoothPath(lower).reversed)
+        path.close()
+        return path
+    }
+
+    /// Fill a path with a vertical gradient spanning its own bounds.
+    private static func fillVertical(_ path: NSBezierPath, top: NSColor, bottom: NSColor) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let b = path.bounds
+        // Degenerate (all-zero) band: a gradient over zero height draws nothing.
+        guard b.height > 0.5, let gradient = NSGradient(starting: bottom, ending: top) else {
+            top.setFill()
+            path.fill()
+            return
+        }
+        ctx.saveGState()
+        path.addClip()
+        gradient.draw(from: NSPoint(x: b.midX, y: b.minY),
+                      to: NSPoint(x: b.midX, y: b.maxY), options: [])
+        ctx.restoreGState()
+    }
+
+    /// Soft fill hanging a fixed depth below a line: progressively wider strokes
+    /// along the curve, clipped to the area beneath it. Following the curve
+    /// matters — a single linear gradient keys off the line's maximum, so any
+    /// lower excursion falls past the gradient's end stop and gets no fill at
+    /// all. Stacking strokes also avoids the seams a per-column gradient leaves.
+    private static func drawGlow(under path: NSBezierPath, points: [NSPoint],
+                                 baseY: CGFloat, depth: CGFloat, color: NSColor) {
+        guard let ctx = NSGraphicsContext.current?.cgContext,
+              depth > 0, let first = points.first, let last = points.last else { return }
+        let area = path.copy() as! NSBezierPath
+        area.line(to: NSPoint(x: last.x, y: baseY))
+        area.line(to: NSPoint(x: first.x, y: baseY))
+        area.close()
+
+        ctx.saveGState()
+        area.addClip()
+        // Per-layer alpha solved so `layers` composites reach gpuGlowPeak.
+        let layerAlpha = 1 - pow(1 - gpuGlowPeak, 1 / CGFloat(gpuGlowLayers))
+        color.withAlphaComponent(layerAlpha).setStroke()
+        let glow = path.copy() as! NSBezierPath
+        glow.lineJoinStyle = .round
+        glow.lineCapStyle = .round
+        for i in 0..<gpuGlowLayers {
+            let t = CGFloat(i + 1) / CGFloat(gpuGlowLayers)
+            glow.lineWidth = 2 * depth * t * t   // quadratic: tighter near the line
+            glow.stroke()
+        }
+        ctx.restoreGState()
     }
 
     private static func straightPath(_ pts: [NSPoint]) -> NSBezierPath {
