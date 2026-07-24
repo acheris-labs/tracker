@@ -383,12 +383,16 @@ final class HistoryRenderer {
         }
     }
 
-    /// Closed path bounded above by `upper` and below by `lower`.
+    /// Closed path bounded above by `upper` and below by `lower`, as ONE
+    /// subpath. Both boundaries are appended into the same subpath rather than
+    /// via `append(_:)` — appending a path starts a fresh subpath (it carries
+    /// its own moveTo), which leaves the upper boundary open and fills it
+    /// closed along a diagonal from its last point back to its first.
     private static func ribbon(upper: [NSPoint], lower: [NSPoint]) -> NSBezierPath {
-        guard let lastLower = lower.last else { return smoothPath(upper) }
-        let path = smoothPath(upper)
-        path.line(to: lastLower)
-        path.append(smoothPath(lower).reversed)
+        guard !lower.isEmpty else { return smoothPath(upper) }
+        let path = NSBezierPath()
+        appendSmooth(upper, to: path, startingWithMove: true)
+        appendSmooth(lower.reversed(), to: path, startingWithMove: false)
         path.close()
         return path
     }
@@ -451,14 +455,26 @@ final class HistoryRenderer {
     /// Catmull-Rom spline through the points, expressed as cubic bezier curves.
     private static func smoothPath(_ pts: [NSPoint]) -> NSBezierPath {
         let path = NSBezierPath()
+        appendSmooth(pts, to: path, startingWithMove: true)
+        return path
+    }
+
+    /// Append the spline through `pts` to `path`. With `startingWithMove` false
+    /// it connects to the current point with a line first, keeping everything
+    /// in one subpath — see `ribbon(upper:lower:)`.
+    private static func appendSmooth(_ pts: [NSPoint], to path: NSBezierPath,
+                                     startingWithMove: Bool) {
+        func begin(_ p: NSPoint) {
+            if startingWithMove { path.move(to: p) } else { path.line(to: p) }
+        }
         guard pts.count > 1 else {
-            if let p = pts.first { path.move(to: p) }
-            return path
+            if let p = pts.first { begin(p) }
+            return
         }
         if pts.count == 2 {
-            path.move(to: pts[0]); path.line(to: pts[1]); return path
+            begin(pts[0]); path.line(to: pts[1]); return
         }
-        path.move(to: pts[0])
+        begin(pts[0])
         for i in 0..<(pts.count - 1) {
             let p0 = pts[max(i - 1, 0)]
             let p1 = pts[i]
@@ -470,6 +486,5 @@ final class HistoryRenderer {
                              y: p2.y - (p3.y - p1.y) / 6.0)
             path.curve(to: p2, controlPoint1: c1, controlPoint2: c2)
         }
-        return path
     }
 }
