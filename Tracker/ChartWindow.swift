@@ -39,7 +39,21 @@ final class ChartView: NSView {
         // The blown-up chart uses smoothed splines / stacked areas; the dock
         // icon keeps the crisp bars (renderer.render()). The card's background
         // is the system text background so it matches the process tables.
-        renderer?.draw(in: bounds, smoothed: true, background: .textBackgroundColor)
+        renderer?.draw(in: bounds, smoothed: true, light: effectiveAppearance.isLight)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyBorderColor()
+        needsDisplay = true
+    }
+
+    /// See FooterPane: the border is a resolved CGColor snapshot, so it has to
+    /// be re-taken whenever the appearance changes.
+    func applyBorderColor() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = NSColor.separatorColor.cgColor
+        }
     }
 }
 
@@ -238,7 +252,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         chartView.layer?.cornerRadius = 10
         chartView.layer?.masksToBounds = true
         chartView.layer?.borderWidth = 0.5
-        chartView.layer?.borderColor = NSColor.separatorColor.cgColor
+        chartView.applyBorderColor()
 
         for l in leftLabels  { bg.addSubview(l) }
         for l in rightLabels { bg.addSubview(l) }
@@ -699,18 +713,24 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
     private func applyCurrentColors() {
         guard let c = renderer?.colors else { return }
-        pSysChip.setColor(c.pSys)
-        eSysChip.setColor(c.eSys)
-        pUserChip.setColor(c.pUser)
-        eUserChip.setColor(c.eUser)
-        gpuChip.setColor(c.gpu)
-        memoryChip.setColor(c.memory)
-        swapChip.setColor(c.swap)
-        batteryChip?.setColor(c.battery)
-        readChip.setColor(c.diskRead)
-        writeChip.setColor(c.diskWrite)
-        netRxChip.setColor(c.netRx)
-        netTxChip.setColor(c.netTx)
+        // The dots must match the lines, which are appearance-adjusted; the
+        // layer-backed dots hold static CGColors, so this runs every refresh.
+        let light = (window?.effectiveAppearance ?? NSApp.effectiveAppearance).isLight
+        func dot(_ chip: LegendChip?, _ color: NSColor) {
+            chip?.setColor(color.onSurface(light: light))
+        }
+        dot(pSysChip, c.pSys)
+        dot(eSysChip, c.eSys)
+        dot(pUserChip, c.pUser)
+        dot(eUserChip, c.eUser)
+        dot(gpuChip, c.gpu)
+        dot(memoryChip, c.memory)
+        dot(swapChip, c.swap)
+        dot(batteryChip, c.battery)
+        dot(readChip, c.diskRead)
+        dot(writeChip, c.diskWrite)
+        dot(netRxChip, c.netRx)
+        dot(netTxChip, c.netTx)
     }
 
     private func updateRightAxis() {

@@ -109,6 +109,32 @@ extension NSColor {
                        blue: f(c.blueComponent), alpha: c.alphaComponent)
     }
 
+    /// The mirror image of `lifted(by:)`, for the light chart: there a
+    /// translucent fill reads *lighter* than the opaque original.
+    func darkened(by amount: CGFloat) -> NSColor {
+        guard let c = usingColorSpace(.sRGB) else { return self }
+        func f(_ v: CGFloat) -> CGFloat { max(0, v * (1 - amount)) }
+        return NSColor(srgbRed: f(c.redComponent), green: f(c.greenComponent),
+                       blue: f(c.blueComponent), alpha: c.alphaComponent)
+    }
+
+    /// The palette is tuned for the near-black card; on a white one the pale
+    /// members (memory's near-white, the network hues) disappear. Cap
+    /// brightness — hard for near-neutral colours, which have no hue to carry
+    /// them — and bump saturation a little so the hue grouping survives.
+    /// Applied at draw time so custom colours get the same treatment.
+    func legibleOnLight() -> NSColor {
+        guard let c = usingColorSpace(.sRGB) else { return self }
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        let cap: CGFloat = s < 0.15 ? 0.45 : 0.78
+        return NSColor(hue: h, saturation: min(1, s * 1.15),
+                       brightness: min(b, cap), alpha: a)
+    }
+
+    /// The colour as drawn on the given surface (see `legibleOnLight`).
+    func onSurface(light: Bool) -> NSColor { light ? legibleOnLight() : self }
+
     static func fromHex(_ s: String) -> NSColor? {
         var t = s
         if t.hasPrefix("#") { t.removeFirst() }
@@ -161,6 +187,8 @@ final class HistoryRenderer {
     private(set) var chartCapacity: Int   // chart window view
     /// Window used by the draw helpers; set on entry to draw()/diskScaleMax().
     private var activeWindow: Int = 8
+    /// Whether the surface being drawn is light; set on entry to draw().
+    private var lightMode: Bool = false
 
     private let pointSize = NSSize(width: 128, height: 128)
     private let pixelScale: CGFloat = 2
@@ -188,14 +216,18 @@ final class HistoryRenderer {
     /// rest (legend hover). The dock icon ignores it.
     var highlightedSeries: ChartSeries?
 
-    /// The series' colour, dimmed toward neutral when another series is
-    /// highlighted. Blending (not alpha) keeps the band-alpha math intact.
+    /// The series' colour as drawn: adjusted for a light surface, then dimmed
+    /// toward the background when another series is highlighted. Blending (not
+    /// alpha) keeps the band-alpha math intact.
     private func seriesColor(_ base: NSColor, _ series: ChartSeries,
                              smoothed: Bool) -> NSColor {
-        guard smoothed, let h = highlightedSeries, h != series else { return base }
+        let c = base.onSurface(light: lightMode)
+        guard smoothed, let h = highlightedSeries, h != series else { return c }
         // Nearly extinguish non-highlighted series: heavy blend toward a
-        // dark neutral plus an alpha cut, so even bright hues recede.
-        let ghost = base.blended(withFraction: 0.88, of: NSColor(white: 0.25, alpha: 1)) ?? base
+        // neutral near the background plus an alpha cut, so even bright hues
+        // recede.
+        let neutral = NSColor(white: lightMode ? 0.80 : 0.25, alpha: 1)
+        let ghost = c.blended(withFraction: 0.88, of: neutral) ?? c
         return ghost.withAlphaComponent(0.55)
     }
 
@@ -300,20 +332,27 @@ final class HistoryRenderer {
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         defer { NSGraphicsContext.current = prevCtx }
 
-        draw(in: NSRect(origin: .zero, size: pointSize))
+        // No view to inherit an appearance from; the Dock is system chrome, so
+        // the tile follows System Settings rather than the app's override.
+        draw(in: NSRect(origin: .zero, size: pointSize),
+             light: AppearanceMode.systemIsLight)
 
         let image = NSImage(size: pointSize)
         image.addRepresentation(rep)
         return image
     }
 
-    /// `background` defaults to the dark fill the menu-bar icon needs; the
-    /// Chart window passes a system color so the card tracks the appearance.
-    func draw(in rect: NSRect, smoothed: Bool = false,
-              background: NSColor = NSColor(white: 0.04, alpha: 1)) {
+    /// `light` selects the palette treatment and the dock icon's card colour;
+    /// the chart card uses the system text background either way, so it tracks
+    /// the appearance like the process tables do.
+    func draw(in rect: NSRect, smoothed: Bool = false, light: Bool = false) {
         // smoothed == the chart window; crisp == the dock icon.
         activeWindow = smoothed ? chartCapacity : iconCapacity
+        lightMode = light
         let traces = smoothed ? chartTraces : iconTraces
+        let background: NSColor = smoothed
+            ? .textBackgroundColor
+            : NSColor(white: light ? 0.97 : 0.04, alpha: 1)
         background.setFill()
         rect.fill()
 
@@ -421,6 +460,12 @@ final class HistoryRenderer {
                                  seriesColor(pUsrColor, .pUser, smoothed: true),
                                  seriesColor(eUsrColor, .eUser, smoothed: true)])
         } else if traces.contains(.cpu) {
+            // Opaque bars, but still appearance-adjusted (no highlight dimming
+            // applies here — smoothed: false).
+            let barPSys = seriesColor(pSysColor, .pSys,  smoothed: false)
+            let barESys = seriesColor(eSysColor, .eSys,  smoothed: false)
+            let barPUsr = seriesColor(pUsrColor, .pUser, smoothed: false)
+            let barEUsr = seriesColor(eUsrColor, .eUser, smoothed: false)
             for i in 0..<visible {
                 let f = frames[visibleIndex(i)]
                 let x = inner.minX + xOffset + CGFloat(i) * colW
@@ -431,16 +476,16 @@ final class HistoryRenderer {
                 let eUsr = CGFloat(f.cpu.eUser * eWeight) * cpuH
 
                 var y = inner.minY
-                pSysColor.setFill()
+                barPSys.setFill()
                 NSRect(x: x, y: y, width: colW, height: pSys).fill()
                 y += pSys
-                eSysColor.setFill()
+                barESys.setFill()
                 NSRect(x: x, y: y, width: colW, height: eSys).fill()
                 y += eSys
-                pUsrColor.setFill()
+                barPUsr.setFill()
                 NSRect(x: x, y: y, width: colW, height: pUsr).fill()
                 y += pUsr
-                eUsrColor.setFill()
+                barEUsr.setFill()
                 NSRect(x: x, y: y, width: colW, height: eUsr).fill()
             }
         }
@@ -448,7 +493,8 @@ final class HistoryRenderer {
         if visible > 1, traces.contains(.gpu), !smoothed {
             drawLine(visible: visible, xOffset: xOffset, colW: colW,
                      bandY: inner.minY, bandH: cpuH,
-                     color: colors.gpu, smoothed: false) { $0.gpu }
+                     color: seriesColor(colors.gpu, .gpu, smoothed: false),
+                     smoothed: false) { $0.gpu }
         }
 
         NSGraphicsContext.current?.cgContext.restoreGState()
@@ -512,7 +558,10 @@ final class HistoryRenderer {
             tops[4].append(NSPoint(x: x, y: y4))
         }
         for k in 1...4 {
-            let c = bandColors[k - 1].lifted(by: Self.bandLift)
+            // Alpha pulls a fill toward the background, so compensate away
+            // from it: lift toward white on the dark card, darken on the light.
+            let c = lightMode ? bandColors[k - 1].darkened(by: Self.bandLift)
+                              : bandColors[k - 1].lifted(by: Self.bandLift)
             Self.fillVertical(Self.ribbon(upper: tops[k], lower: tops[k - 1]),
                               top: c.withAlphaComponent(Self.bandAlphaTop),
                               bottom: c.withAlphaComponent(Self.bandAlphaBottom))

@@ -13,7 +13,7 @@ final class FooterPane: NSView {
         wantsLayer = true
         layer?.cornerRadius = 6
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.separatorColor.cgColor
+        applyBorderColor()
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
         var constraints = [
@@ -30,6 +30,21 @@ final class FooterPane: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
+
+    /// A CGColor is a snapshot resolved under whatever appearance was current
+    /// when it was taken, so it has to be re-taken when the appearance
+    /// changes — otherwise the dark separator (a pale translucent white) stays
+    /// put and the panes lose their edges on the light background.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyBorderColor()
+    }
+
+    private func applyBorderColor() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = NSColor.separatorColor.cgColor
+        }
+    }
 }
 
 /// Label/value rows with hairline separators between them, like the grids in

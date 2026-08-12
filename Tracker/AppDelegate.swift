@@ -66,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Before any window or the first icon render, so nothing flashes the
+        // system appearance when the user has pinned light or dark.
+        AppearanceMode.load().apply()
         processIntervalSeconds = max(1, min(60, Self.intDefault("ProcessRefreshSeconds", default: 2)))
         // Dock icon: short "right now" view; chart: longer-term picture.
         // Migrates the old single HistorySeconds key to the dock's.
@@ -305,12 +308,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 iconTraces: renderer.iconTraces,
                 chartTraces: renderer.chartTraces,
                 drainThreshold: Self.intDefault("BadgeThresholdWatts", default: 20),
+                appearance: AppearanceMode.load(),
 
                 onColorsChange: { [weak self] c in self?.applyColors(c) },
                 onTracesChange: { [weak self] surface, traces in
                     self?.applyTraces(surface: surface, traces: traces)
                 },
-                onThresholdChange: { [weak self] v in self?.applyThreshold(v) }
+                onThresholdChange: { [weak self] v in self?.applyThreshold(v) },
+                onAppearanceChange: { [weak self] m in self?.applyAppearance(m) }
             )
         } else {
             prefs?.sync(colors: renderer.colors)
@@ -420,6 +425,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if boolDefault("ShowDisk", default: false) { t.insert(.disk) }
         if boolDefault("ShowNetwork", default: false) { t.insert(.network) }
         return t
+    }
+
+    private func applyAppearance(_ mode: AppearanceMode) {
+        mode.apply()
+        // Windows re-render themselves off NSApp.appearance; the dock icon is
+        // a bitmap we own, so redraw it now (auto mode's system switches get
+        // picked up by the next tick).
+        NSApp.applicationIconImage = renderer.render()
     }
 
     private func applyColors(_ c: ChartColors) {

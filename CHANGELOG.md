@@ -11,6 +11,19 @@ auto-update prompt.
 
 ## [Unreleased]
 
+### Added
+- **Light mode.** Preferences gains an Appearance control — Auto (default,
+  follows System Settings live), Light, or Dark — and the whole app honors
+  it, chart included. On a light card the chart palette is adjusted for
+  legibility (brightness capped, saturation nudged) so near-white and pale
+  traces like Memory and Network stay readable; custom colors get the same
+  treatment. The dock icon keeps following System Settings rather than the
+  app's override, since it's drawn on the Dock's own material.
+
+### Fixed
+- Footer panes and the chart card kept their borders from the appearance they
+  were created in, so the outlines disappeared after an appearance switch.
+
 ## [0.3.0] - 2026-08-12
 
 ### Added
