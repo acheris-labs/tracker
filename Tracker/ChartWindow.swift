@@ -510,10 +510,10 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         let hist = NSMenuItem(title: "Chart History", action: nil, keyEquivalent: "")
         let histMenu = NSMenu()
         histMenu.autoenablesItems = false
-        let current = renderer?.capacity ?? 0
-        for d in AppDelegate.durations {
+        let current = renderer?.chartCapacity ?? 0
+        for d in AppDelegate.chartDurations {
             let mi = NSMenuItem(title: d.label,
-                                action: #selector(AppDelegate.setDurationFromMenu(_:)),
+                                action: #selector(AppDelegate.setChartDurationFromMenu(_:)),
                                 keyEquivalent: "")
             mi.tag = d.seconds
             mi.state = (d.seconds == current) ? .on : .off

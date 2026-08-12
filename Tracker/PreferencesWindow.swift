@@ -90,7 +90,7 @@ final class PreferencesWindowController: NSWindowController {
         popup.action = #selector(durationChanged(_:))
         self.popup = popup
         select(seconds: currentDuration)
-        grid.addRow(with: [Self.label("History duration:"), popup])
+        grid.addRow(with: [Self.label("Dock icon history:"), popup])
 
         // Show/hide overlays
         let gpuCheck = NSButton(checkboxWithTitle: "Show GPU",

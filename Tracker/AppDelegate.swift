@@ -58,11 +58,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ("10 minutes", 600),
     ]
 
+    /// Chart window durations — the longer-term picture, up to an hour.
+    static let chartDurations: [(label: String, seconds: Int)] = durations + [
+        ("15 minutes", 900),
+        ("30 minutes", 1800),
+        ("1 hour", 3600),
+    ]
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         processIntervalSeconds = max(1, min(60, Self.intDefault("ProcessRefreshSeconds", default: 2)))
-        let raw = UserDefaults.standard.integer(forKey: "HistorySeconds")
-        let capacity = raw <= 0 ? 120 : max(15, min(600, raw))
-        renderer = HistoryRenderer(capacity: capacity, numP: cpu.numP, numE: cpu.numE,
+        // Dock icon: short "right now" view; chart: longer-term picture.
+        // Migrates the old single HistorySeconds key to the dock's.
+        let d = UserDefaults.standard
+        var dockRaw = d.integer(forKey: "DockHistorySeconds")
+        if dockRaw <= 0 { dockRaw = d.integer(forKey: "HistorySeconds") }
+        let dockCapacity = dockRaw <= 0 ? 30 : max(15, min(600, dockRaw))
+        let chartRaw = d.integer(forKey: "ChartHistorySeconds")
+        let chartCapacity = chartRaw <= 0 ? 300 : max(15, min(3600, chartRaw))
+        renderer = HistoryRenderer(iconCapacity: dockCapacity,
+                                   chartCapacity: chartCapacity,
+                                   numP: cpu.numP, numE: cpu.numE,
                                    hasBattery: battery.hasBattery,
                                    colors: ChartColors.load())
         renderer.showGPU = Self.boolDefault("ShowGPU", default: true)
@@ -70,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderer.showMemory = Self.boolDefault("ShowMemory", default: false)
         renderer.showDisk = Self.boolDefault("ShowDisk", default: false)
 
-        NSLog("topology: P=\(cpu.numP) E=\(cpu.numE), history=\(capacity)s")
+        NSLog("topology: P=\(cpu.numP) E=\(cpu.numE), dock=\(dockCapacity)s chart=\(chartCapacity)s")
         _ = cpu.sample()
         NSApp.applicationIconImage = renderer.render()
         NSApp.mainMenu = buildMainMenu()
@@ -224,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let durationParent = NSMenuItem(title: "History duration",
+        let durationParent = NSMenuItem(title: "Dock Icon History",
                                         action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.autoenablesItems = false
@@ -269,7 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let w = Self.bytesFormatter.string(fromByteCount: Int64(lastDiskWrite))
         dItem?.title = "Disk: R \(r)/s · W \(w)/s"
 
-        let current = renderer?.capacity ?? 0
+        let current = renderer?.iconCapacity ?? 0
         if let submenu = durationSubmenu {
             for item in submenu.items {
                 item.state = (item.tag == current) ? .on : .off
@@ -278,14 +293,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func setDurationFromMenu(_ sender: NSMenuItem) {
-        applyDuration(sender.tag)
+        applyDockDuration(sender.tag)
     }
 
     @objc func showPreferences(_ sender: Any?) {
         if prefs == nil {
             prefs = PreferencesWindowController(
                 durations: Self.durations,
-                currentDuration: renderer.capacity,
+                currentDuration: renderer.iconCapacity,
                 colors: renderer.colors,
                 hasBattery: battery.hasBattery,
                 showGPU: renderer.showGPU,
@@ -294,7 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showDisk: renderer.showDisk,
                 drainThreshold: Self.intDefault("BadgeThresholdWatts", default: 20),
                 autoUpdate: updaterController.updater.automaticallyChecksForUpdates,
-                onDurationChange: { [weak self] s in self?.applyDuration(s) },
+                onDurationChange: { [weak self] s in self?.applyDockDuration(s) },
                 onColorsChange: { [weak self] c in self?.applyColors(c) },
                 onShowGPUChange: { [weak self] b in self?.applyShowGPU(b) },
                 onShowBatteryChange: { [weak self] b in self?.applyShowBattery(b) },
@@ -304,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onAutoUpdateChange: { [weak self] b in self?.applyAutoUpdate(b) }
             )
         } else {
-            prefs?.sync(currentDuration: renderer.capacity)
+            prefs?.sync(currentDuration: renderer.iconCapacity)
             prefs?.sync(colors: renderer.colors)
         }
         NSApp.activate()
@@ -404,13 +419,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.applicationIconImage = renderer.render()
     }
 
-    private func applyDuration(_ seconds: Int) {
+    private func applyDockDuration(_ seconds: Int) {
         guard seconds > 0 else { return }
         let clamped = max(15, min(600, seconds))
-        UserDefaults.standard.set(clamped, forKey: "HistorySeconds")
-        renderer.resize(capacity: clamped)
+        UserDefaults.standard.set(clamped, forKey: "DockHistorySeconds")
+        renderer.resizeIcon(capacity: clamped)
         NSApp.applicationIconImage = renderer.render()
         prefs?.sync(currentDuration: clamped)
+    }
+
+    private func applyChartDuration(_ seconds: Int) {
+        guard seconds > 0 else { return }
+        let clamped = max(15, min(3600, seconds))
+        UserDefaults.standard.set(clamped, forKey: "ChartHistorySeconds")
+        renderer.resizeChart(capacity: clamped)
+        chart?.chartView.needsDisplay = true
+    }
+
+    @objc func setChartDurationFromMenu(_ sender: NSMenuItem) {
+        applyChartDuration(sender.tag)
     }
 
     private func tick() {

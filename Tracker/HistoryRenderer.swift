@@ -102,16 +102,20 @@ extension NSColor {
 }
 
 final class HistoryRenderer {
-    // Storage holds up to `storage` recent samples; the view window
-    // (`capacity`) selects how many of the most recent samples to draw.
-    // Decoupling the two means resizing the view never loses data.
-    static let maxStorage: Int = 600
+    // Storage holds up to `maxStorage` recent samples; two independent view
+    // windows select how many of the most recent samples each surface draws:
+    // the dock icon short ("what's happening right now"), the chart window
+    // long (up to an hour). Resizing either never loses data.
+    static let maxStorage: Int = 3600
 
     private var frames: [HistoryFrame]
     private var head: Int = 0
     private var count: Int = 0
 
-    private(set) var capacity: Int   // current view window in samples (= seconds at 1 Hz)
+    private(set) var iconCapacity: Int    // dock icon window (samples = seconds at 1 Hz)
+    private(set) var chartCapacity: Int   // chart window view
+    /// Window used by the draw helpers; set on entry to draw()/diskScaleMax().
+    private var activeWindow: Int = 8
 
     private let pointSize = NSSize(width: 128, height: 128)
     private let pixelScale: CGFloat = 2
@@ -135,10 +139,13 @@ final class HistoryRenderer {
     var showMemory: Bool = true
     var showDisk: Bool = true
 
-    init(capacity: Int, numP: Int, numE: Int, hasBattery: Bool, colors: ChartColors) {
+    init(iconCapacity: Int, chartCapacity: Int, numP: Int, numE: Int,
+         hasBattery: Bool, colors: ChartColors) {
         self.colors = colors
         self.hasBattery = hasBattery
-        self.capacity = max(8, min(Self.maxStorage, capacity))
+        self.iconCapacity = max(8, min(Self.maxStorage, iconCapacity))
+        self.chartCapacity = max(8, min(Self.maxStorage, chartCapacity))
+        self.activeWindow = self.iconCapacity
         self.frames = Array(repeating: HistoryFrame(cpu: CPUFrame(), gpu: 0, battery: 0,
                                                     memory: 0,
                                                     diskRead: 0, diskWrite: 0),
@@ -148,8 +155,12 @@ final class HistoryRenderer {
         self.eWeight = Double(numE) / Double(total)
     }
 
-    func resize(capacity newCapacity: Int) {
-        capacity = max(8, min(Self.maxStorage, newCapacity))
+    func resizeIcon(capacity newCapacity: Int) {
+        iconCapacity = max(8, min(Self.maxStorage, newCapacity))
+    }
+
+    func resizeChart(capacity newCapacity: Int) {
+        chartCapacity = max(8, min(Self.maxStorage, newCapacity))
     }
 
     func append(cpu: CPUFrame, gpu: Double, battery: Double, memory: Double,
@@ -162,7 +173,7 @@ final class HistoryRenderer {
     }
 
     private func visibleCount() -> Int {
-        return min(count, capacity)
+        return min(count, activeWindow)
     }
 
     /// Index in `frames` for the i-th visible sample (0 = oldest visible).
@@ -174,6 +185,7 @@ final class HistoryRenderer {
     /// Visible-window max disk throughput in bytes/sec — what the chart's
     /// right-axis auto-scale is currently mapped to. Floor 1 MiB/s.
     func diskScaleMax() -> Double {
+        activeWindow = chartCapacity   // only the chart's right axis uses this
         let visible = visibleCount()
         var maxIO: Double = 1_048_576
         for i in 0..<visible {
@@ -214,6 +226,8 @@ final class HistoryRenderer {
     /// Chart window passes a system color so the card tracks the appearance.
     func draw(in rect: NSRect, smoothed: Bool = false,
               background: NSColor = NSColor(white: 0.04, alpha: 1)) {
+        // smoothed == the chart window; crisp == the dock icon.
+        activeWindow = smoothed ? chartCapacity : iconCapacity
         background.setFill()
         rect.fill()
 
@@ -223,7 +237,7 @@ final class HistoryRenderer {
 
         let H = inner.height
         let W = inner.width
-        let colW = W / CGFloat(capacity)
+        let colW = W / CGFloat(activeWindow)
         let visible = visibleCount()
 
         // Two y-axes share the full drawable area:
