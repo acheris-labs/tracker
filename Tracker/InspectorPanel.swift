@@ -358,19 +358,18 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
         connectionsRefreshInFlight = true
         let pid = self.pid
         workQueue.async { [weak self] in
-            let scan = ConnectionSampler.connections(pid: pid)
+            // libproc can only read our own processes' descriptors; for the
+            // rest, netstat sees the same sockets from the outside (it's a
+            // subprocess, so it's the fallback rather than the default).
+            let rows: [Connection]
+            switch ConnectionSampler.connections(pid: pid) {
+            case .ok(let own):  rows = own
+            case .notPermitted: rows = SystemConnectionSampler.sample().filter { $0.pid == pid }
+            }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.connectionsRefreshInFlight = false
-                switch scan {
-                case .ok(let rows):
-                    self.connections.setConnections(rows)
-                case .notPermitted:
-                    // Sockets are only readable for our own processes; saying so
-                    // beats an empty table that reads as "no connections".
-                    self.connections.setUnavailable(
-                        "Not available — this process belongs to another user.")
-                }
+                self.connections.setConnections(rows)
             }
         }
     }

@@ -356,9 +356,36 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
                                    NSToolbarDelegate, NSMenuDelegate {
     let chartView: ChartView
     let processList = ProcessListView()
+    let connectionList = ConnectionListView(showProcess: true, defaultsKey: "all")
+
+    /// What the segmented control's index means. The process categories keep
+    /// their own enum; this one is about window chrome.
+    enum Pane: Equatable {
+        case chart
+        case process(ProcessListView.Tab)
+        case connections
+
+        init(index: Int) {
+            switch index {
+            case 0: self = .chart
+            case ConnectionsIndex.value: self = .connections
+            default: self = ProcessListView.Tab(rawValue: index - 1).map(Pane.process) ?? .chart
+            }
+        }
+
+        var isProcess: Bool { if case .process = self { return true }; return false }
+        /// Search filters both lists; Quit/Inspect act on a selected process.
+        var hasSearch: Bool { self != .chart }
+        var hasProcessActions: Bool { isProcess }
+    }
+
+    /// Last segment; kept in one place so the index arithmetic has a name.
+    enum ConnectionsIndex { static let value = 6 }
+
+    private(set) var pane: Pane = .chart
     private let tabs = RightClickableTabView()
     private let selector = NSSegmentedControl(
-        labels: ["Chart", "CPU", "Memory", "Energy", "Disk", "Network"],
+        labels: ["Chart", "CPU", "Memory", "Energy", "Disk", "Network", "Connections"],
         trackingMode: .selectOne, target: nil, action: nil)
     private weak var renderer: HistoryRenderer?
     private let hasBattery: Bool
@@ -633,9 +660,16 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         ])
         procTab.view = procContainer
 
+        connectionList.onInspect = { [weak self] pid in
+            self?.processList.openInspector(pid: pid)
+        }
+        let connTab = NSTabViewItem(identifier: "connections")
+        connTab.view = connectionList
+
         tabs.tabViewType = .noTabsNoBorder
         tabs.addTabViewItem(chartTab)
         tabs.addTabViewItem(procTab)
+        tabs.addTabViewItem(connTab)
         tabs.translatesAutoresizingMaskIntoConstraints = false
 
         // Lives in the unified toolbar (centered), not in the content.
@@ -672,7 +706,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     func toolbar(_ toolbar: NSToolbar,
                  itemForItemIdentifier id: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        let onProcess = selector.selectedSegment > 0
+        let onProcess = Pane(index: selector.selectedSegment).hasProcessActions
         switch id {
         case .quitProcess:
             let item = NSToolbarItem(itemIdentifier: id)
@@ -724,7 +758,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             item.preferredWidthForSearchField = 180
             item.resignsFirstResponderWithCancel = true
             item.searchField.placeholderString = "Search"
-            item.searchField.isEnabled = onProcess
+            item.searchField.isEnabled = Pane(index: selector.selectedSegment).hasSearch
             item.searchField.target = self
             item.searchField.action = #selector(searchChanged(_:))
             searchItem = item
@@ -753,7 +787,11 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func searchChanged(_ sender: NSSearchField) {
-        processList.setSearch(sender.stringValue)
+        // One field, whichever list is showing.
+        switch pane {
+        case .connections: connectionList.setFilter(sender.stringValue)
+        default:           processList.setSearch(sender.stringValue)
+        }
     }
 
     // NSMenuDelegate — rebuild the "…" menu on open so the interval checkmark
@@ -761,7 +799,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === actionsItem?.menu else { return }
         menu.removeAllItems()
-        let onProcess = selector.selectedSegment > 0
+        let onProcess = pane.isProcess
 
         // The toolbar's menu button is pull-down-style: it consumes the first
         // item as its own face, so give it a hidden placeholder to eat.
@@ -818,8 +856,10 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         menu.addItem(hist)
 
         let cols = NSMenuItem(title: "Columns", action: nil, keyEquivalent: "")
-        cols.submenu = processList.columnSelectorMenu()
-        cols.isEnabled = onProcess
+        cols.submenu = pane == .connections
+            ? connectionList.columnSelectorMenu()
+            : processList.columnSelectorMenu()
+        cols.isEnabled = onProcess || pane == .connections
         menu.addItem(cols)
 
         // Destructive action last.
@@ -847,36 +887,51 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     // Menu-driven selection (⌘1 / ⌘2 from the app's Window menu).
     @objc func selectChartTab(_ sender: Any?)     { applySelection(0) }   // Chart
     @objc func selectProcessesTab(_ sender: Any?) { applySelection(1) }   // CPU category
+    @objc func selectConnectionsTab(_ sender: Any?) { applySelection(ConnectionsIndex.value) }
 
     @objc private func selectorChanged(_ s: NSSegmentedControl) {
         applySelection(s.selectedSegment)
     }
 
-    /// 0 = Chart; 1…4 = process categories (CPU/Memory/Energy/Disk).
+    /// 0 = Chart; 1…5 = process categories; 6 = Connections.
     private func applySelection(_ index: Int) {
         let i = max(0, index)
         selector.selectedSegment = i
-        let onProcess = i > 0
-        if onProcess {
-            tabs.selectTabViewItem(at: 1)
-            if let t = ProcessListView.Tab(rawValue: i - 1) { processList.showCategory(t) }
-        } else {
+        pane = Pane(index: i)
+        switch pane {
+        case .chart:
             tabs.selectTabViewItem(at: 0)
+        case .process(let t):
+            tabs.selectTabViewItem(at: 1)
+            processList.showCategory(t)
+        case .connections:
+            tabs.selectTabViewItem(at: 2)
         }
         // AM-style subtitle under the window title on the process tabs.
-        window?.subtitle = onProcess ? processList.scope.label : ""
-        // Process-only toolbar items hide on the Chart tab (macOS 15+;
-        // merely disabled on 14, where NSToolbarItem.isHidden doesn't exist).
-        quitItem?.isEnabled = onProcess
-        inspectItem?.isEnabled = onProcess
+        window?.subtitle = pane.isProcess ? processList.scope.label : ""
+        // Process-only toolbar items hide elsewhere (macOS 15+; merely disabled
+        // on 14, where NSToolbarItem.isHidden doesn't exist).
+        let actions = pane.hasProcessActions
+        quitItem?.isEnabled = actions
+        inspectItem?.isEnabled = actions
         if #available(macOS 15.0, *) {
-            quitItem?.isHidden = !onProcess
-            inspectItem?.isHidden = !onProcess
+            quitItem?.isHidden = !actions
+            inspectItem?.isHidden = !actions
         }
         if let search = searchItem {
-            search.searchField.isEnabled = onProcess
-            if !onProcess { search.endSearchInteraction() }
+            search.searchField.isEnabled = pane.hasSearch
+            if !pane.hasSearch { search.endSearchInteraction() }
         }
+    }
+
+    /// Feed the system-wide connections view; names come from the process list
+    /// so the netstat column's 16-character truncation doesn't show.
+    func setConnections(_ rows: [Connection], processNames: [pid_t: ProcessOwner]) {
+        connectionList.setConnections(rows, processNames: processNames)
+    }
+
+    var isConnectionsPaneVisible: Bool {
+        pane == .connections && (window?.isVisible ?? false)
     }
 
     private static func axisLabel(_ s: String, alignment: NSTextAlignment) -> NSTextField {

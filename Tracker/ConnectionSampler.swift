@@ -1,9 +1,12 @@
 import Darwin
 import Foundation
 
-/// One socket a process holds open, as reported by libproc. Hashable is the
-/// dedup key: dup'd descriptors share a socket, so the same connection comes
-/// back several times from a single fd walk.
+/// One socket, from libproc (per-process) or netstat (system-wide).
+///
+/// Equality and hashing cover the identity fields only — dup'd descriptors
+/// share a socket, so the same connection comes back several times from one fd
+/// walk, and byte counters change every tick without making it a different
+/// connection.
 struct Connection: Hashable {
     var pid: pid_t
     var proto: ConnectionProto
@@ -12,6 +15,33 @@ struct Connection: Hashable {
     var remoteAddr: String      // "" for an unconnected socket (listeners)
     var remotePort: UInt16
     var state: Int32            // TSI_S_*; -1 for UDP, which has no state
+
+    /// Only netstat supplies these; nil from libproc.
+    var processName: String?
+    var rxBytes: Double?
+    var txBytes: Double?
+
+    static func == (a: Connection, b: Connection) -> Bool {
+        a.pid == b.pid && a.proto == b.proto
+            && a.localPort == b.localPort && a.remotePort == b.remotePort
+            && a.localAddr == b.localAddr && a.remoteAddr == b.remoteAddr
+            && a.state == b.state
+    }
+
+    func hash(into h: inout Hasher) {
+        h.combine(pid); h.combine(proto)
+        h.combine(localPort); h.combine(remotePort)
+        h.combine(localAddr); h.combine(remoteAddr)
+        h.combine(state)
+    }
+}
+
+/// What a pid belongs to, for the connections table's Process Name column:
+/// the full name (netstat truncates to 16 characters) and the executable path
+/// the icon is resolved from.
+struct ProcessOwner: Equatable {
+    var name: String
+    var execPath: String
 }
 
 enum ConnectionProto: String {

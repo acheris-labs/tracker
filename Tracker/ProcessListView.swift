@@ -134,7 +134,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private static let tabKey = "ProcessTab"
 
     /// Process icons, cached by executable path (an icon never changes for a path).
-    private var iconCache: [String: NSImage] = [:]
+    private static var iconCache: [String: NSImage] = [:]
 
     static let bytesFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -777,6 +777,13 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     /// Live inspector panels, one per pid; updated from setSnapshots.
     private var inspectors: [pid_t: InspectorPanelController] = [:]
 
+    /// Open the inspector for a pid the caller found elsewhere (the
+    /// Connections tab). No-op if the process has since exited.
+    func openInspector(pid: pid_t) {
+        guard let snap = allRows.first(where: { $0.pid == pid }) else { NSSound.beep(); return }
+        openInspector(for: snap)
+    }
+
     @objc func inspectSelected() {
         guard let r = selectedRowIndex() else { NSSound.beep(); return }
         openInspector(for: rows[r])
@@ -793,7 +800,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
             return
         }
         let panel = InspectorPanelController(snapshot: snap,
-                                             icon: icon(forExecPath: snap.execPath))
+                                             icon: Self.icon(forExecPath: snap.execPath))
         panel.onClose = { [weak self] in self?.inspectors[snap.pid] = nil }
         // Cascade additional panels so they don't restore exactly on top of
         // one another (they share a frame-autosave name).
@@ -868,7 +875,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         if id == "name" {
             let cell = (table.makeView(withIdentifier: col.identifier, owner: self)
                         as? NSTableCellView) ?? Self.makeNameCell(identifier: col.identifier)
-            cell.imageView?.image = icon(forExecPath: snap.execPath)
+            cell.imageView?.image = Self.icon(forExecPath: snap.execPath)
             cell.textField?.stringValue = snap.name
             return cell
         }
@@ -941,8 +948,9 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         return cell
     }
 
-    /// Name column: process icon + truncating name label.
-    private static func makeNameCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
+    /// Name column: process icon + truncating name label. Shared with
+    /// ConnectionListView so its Process Name column matches.
+    static func makeNameCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
         let cell = NSTableCellView()
         cell.identifier = identifier
         let iv = NSImageView()
@@ -971,7 +979,8 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     /// Resolve a process's icon from its executable path, cached. App bundles
     /// get the app icon; pathless system processes get the generic exec icon.
-    private func icon(forExecPath p: String) -> NSImage {
+    /// Static so any view can share one cache — icon lookups hit the disk.
+    static func icon(forExecPath p: String) -> NSImage {
         let key = p.isEmpty ? "<none>" : p
         if let c = iconCache[key] { return c }
         let base: NSImage

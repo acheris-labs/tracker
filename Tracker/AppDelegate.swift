@@ -29,6 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastMemory: Double = 0
     private var lastDiskRead: Double = 0
     private var lastDiskWrite: Double = 0
+    private let connectionQueue = DispatchQueue(label: "net.acheris.tracker.netstat",
+                                                qos: .utility)
+    private var connectionsInFlight = false
+    private var lastProcessNames: [pid_t: ProcessOwner] = [:]
     private var prefs: PreferencesWindowController?
     private var chart: ChartWindowController?
 
@@ -121,6 +125,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chart?.selectProcessesTab(nil)
     }
 
+    @objc func showConnectionsTab(_ sender: Any?) {
+        ensureChartWindow()
+        chart?.selectConnectionsTab(nil)
+        pushConnections()
+    }
+
     private func ensureChartWindow() {
         let wasVisible = chart?.window?.isVisible ?? false
         if chart == nil {
@@ -146,6 +156,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chart?.processList.setSnapshots(processes.sample())
         pushSystemStats()
         processTickCount = 0
+    }
+
+    /// System-wide connections for the Connections tab. netstat is a
+    /// subprocess, so it runs off the main thread and only while that tab is
+    /// on screen; overlapping samples are dropped rather than queued.
+    private func pushConnections() {
+        guard let chart, chart.isConnectionsPaneVisible, !connectionsInFlight else { return }
+        connectionsInFlight = true
+        let names = lastProcessNames
+        connectionQueue.async { [weak self] in
+            let rows = SystemConnectionSampler.sample()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.connectionsInFlight = false
+                self.chart?.setConnections(rows, processNames: names)
+            }
+        }
     }
 
     private func applyProcessInterval(_ seconds: Int) {
@@ -513,6 +540,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     snaps[i].netTxPackets = n.txPackets
                 }
                 chart?.processList.setSnapshots(snaps)
+                lastProcessNames = Dictionary(
+                    snaps.map { ($0.pid, ProcessOwner(name: $0.name, execPath: $0.execPath)) },
+                    uniquingKeysWith: { a, _ in a })
+                pushConnections()
                 processTickCount = 0
             }
         }
@@ -588,6 +619,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         procItem.target = self
         appMenu.addItem(procItem)
+        let connItem = NSMenuItem(
+            title: "Connections",
+            action: #selector(showConnectionsTab(_:)),
+            keyEquivalent: "3"
+        )
+        connItem.target = self
+        appMenu.addItem(connItem)
         let findItem = NSMenuItem(
             title: "Filter Processes…",
             action: #selector(ChartWindowController.focusSearch(_:)),

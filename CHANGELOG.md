@@ -12,6 +12,13 @@ auto-update prompt.
 ## [Unreleased]
 
 ### Added
+- **Connections tab.** A new top-level tab listing every connection on the
+  machine — process name (with its icon) and PID, protocol, local port, remote
+  host, remote port, TCP state, and bytes received/sent per connection. It
+  reads `netstat -anv`, so unlike the per-process view it isn't limited to
+  processes you own: root-owned daemons appear too. Sortable on every column,
+  filtered by the toolbar's search field, and double-clicking a row opens that
+  process's inspector.
 - **Connections tab in the per-process inspector.** Every TCP/UDP socket the
   process holds: protocol, local port, remote host, remote port and TCP state,
   sortable, refreshed on the existing tick. Remote addresses are resolved to
@@ -19,8 +26,9 @@ auto-update prompt.
   Apple, Cloudflare and Fastly ranges typically have no PTR), falling back to
   the raw IP; the full name, address and local endpoint are on the row's
   tooltip. Processes belonging to another user say so rather than showing an
-  empty list — their sockets aren't readable without root, and now the check
-  happens up front instead of by failing.
+  empty list — their sockets aren't readable without root, though the panel now
+  falls back to netstat for those, so it shows the same rows the top-level tab
+  does.
 - **Chart hover readouts.** Hovering a line (or a CPU band) in the Chart view
   spotlights it and shows a small panel with the series, its value at that
   moment, and the time it was sampled. Hovering empty space shows nothing —

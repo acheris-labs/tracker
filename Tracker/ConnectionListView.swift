@@ -11,7 +11,7 @@ import AppKit
 /// flag and the defaults namespace differ.
 final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private enum SortKey: String {
-        case process, proto, laddr, lport, rhost, rport, state
+        case process, pid, proto, laddr, lport, rhost, rport, state, rcvd, sent
     }
 
     private let table = NSTableView()
@@ -20,11 +20,16 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     private let showProcess: Bool
     private let defaultsKey: String
 
-    private var rows: [Connection] = []
-    private var names: [pid_t: String] = [:]
-    private var shown: Set<Connection> = []       // for the no-op diff
-    private var sortKey: SortKey = .rhost
+    private var all: [Connection] = []            // before the filter
+    private var rows: [Connection] = []           // displayed
+    private var owners: [pid_t: ProcessOwner] = [:]
+    private var filter = ""
+    private var shown: Set<Connection> = []       // identity half of the no-op diff
+    private var shownBytes: Double = 0            // byte half of it
+    private var sortKey: SortKey
     private var sortAscending = true
+    /// Clip width the columns were last fitted to.
+    private var lastFitWidth: CGFloat = 0
     private var defaultWidths: [String: CGFloat] = [:]
     private var isFittingColumns = false
     /// True while showing a "can't read this" message rather than rows.
@@ -35,11 +40,12 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
 
     /// The column that absorbs leftover width, like Process Name does in the
     /// process tabs.
-    private var elasticColumnID: String { showProcess ? "process" : "rhost" }
+    private var elasticColumnID: String { "rhost" }
 
     init(showProcess: Bool, defaultsKey: String) {
         self.showProcess = showProcess
         self.defaultsKey = defaultsKey
+        self.sortKey = showProcess ? .process : .rhost
         super.init(frame: NSRect(x: 0, y: 0, width: 480, height: 240))
         // NSTabView positions its item views by frame, so this one stays
         // frame-based (like the sibling panes) and its scroll view autoresizes.
@@ -63,19 +69,54 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     /// Replace the contents. Unchanged data is a no-op so a 1 Hz refresh
     /// doesn't re-sort and flicker rows that haven't moved.
     func setConnections(_ connections: [Connection],
-                        processNames: [pid_t: String] = [:]) {
+                        processNames: [pid_t: ProcessOwner] = [:]) {
         let incoming = Set(connections)
-        if !unavailable, incoming == shown, processNames == names { return }
+        // Identity alone isn't enough once byte counters are in play, but they
+        // are excluded from ==, so diff them separately rather than reloading
+        // whenever a single counter ticks.
+        let bytes = connections.reduce(0.0) { $0 + ($1.rxBytes ?? 0) + ($1.txBytes ?? 0) }
+        if !unavailable, incoming == shown, bytes == shownBytes, processNames == owners { return }
         unavailable = false
         shown = incoming
-        names = processNames
-        rows = sorted(connections)
+        shownBytes = bytes
+        owners = processNames
+        all = connections
+        applyFilterAndSort()
+    }
+
+    /// Live filter over process name, addresses, ports and state — what the
+    /// window's search field types into.
+    func setFilter(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard trimmed != filter else { return }
+        filter = trimmed
+        applyFilterAndSort()
+    }
+
+    private func applyFilterAndSort() {
+        let matches = filter.isEmpty ? all : all.filter { c in
+            let fields = [processLabel(c), "\(c.pid)", c.proto.label, c.localAddr,
+                          "\(c.localPort)", remoteHost(c), c.remoteAddr,
+                          "\(c.remotePort)", ConnectionSampler.stateLabel(c.state)]
+            return fields.contains { $0.localizedCaseInsensitiveContains(filter) }
+        }
+        rows = sorted(matches)
         reloadPreservingSelection()
-        if connections.isEmpty {
-            showPlaceholder("No connections")
+        // Data arrives long after the tab view sized this view, and the resize
+        // hooks don't reliably fire for a frame-based pane, so settle the
+        // elastic column here too — it costs a tile() every couple of seconds.
+        fitElasticColumn()
+        if rows.isEmpty {
+            showPlaceholder(all.isEmpty ? "No connections" : "No matching connections")
         } else {
             hidePlaceholder()
         }
+    }
+
+    /// Full process name where we have it: netstat truncates to 16 characters,
+    /// but our own process list knows the whole thing.
+    private func processLabel(_ c: Connection) -> String {
+        owners[c.pid]?.name ?? c.processName ?? "—"
     }
 
     /// Show why there's nothing to show (e.g. the process isn't ours to read).
@@ -88,8 +129,17 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         showPlaceholder(message)
     }
 
-    /// The column menu shape the toolbar's "…" menu expects, for the future
-    /// top-level tab.
+    /// Double-click hands the row's pid back, so the window can open the same
+    /// inspector the process tabs do.
+    var onInspect: ((pid_t) -> Void)?
+
+    @objc private func rowDoubleClicked(_ sender: Any?) {
+        let row = table.clickedRow
+        guard row >= 0, row < rows.count else { return }
+        onInspect?(rows[row].pid)
+    }
+
+    /// The column menu shape the toolbar's "…" menu expects.
     func columnSelectorMenu() -> NSMenu {
         let menu = NSMenu()
         for col in table.tableColumns where col.identifier.rawValue != elasticColumnID {
@@ -118,27 +168,32 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         table.headerView = NSTableHeaderView()
         table.dataSource = self
         table.delegate = self
+        table.target = self
+        table.doubleAction = #selector(rowDoubleClicked(_:))
 
         if showProcess {
-            addColumn(id: "process", title: "Process", width: 170, key: .process,
+            addColumn(id: "process", title: "Process Name", width: 160, key: .process,
                       alignment: .left)
+            addColumn(id: "pid", title: "PID", width: 58, key: .pid, alignment: .right)
         }
         addColumn(id: "proto", title: "Protocol", width: 62, key: .proto, alignment: .left)
         // The .inset style spends 17pt between every column, so a sixth column
         // costs ~120pt of a 570pt pane. The local address is the same LAN IP on
         // every row of a single process, so the inspector spends that width on
         // the remote host instead; the wider top-level view keeps the column.
-        if showProcess {
-            addColumn(id: "laddr", title: "Local Address", width: 104, key: .laddr,
-                      alignment: .left)
-        }
-        addColumn(id: "lport", title: "Local Port", width: 68, key: .lport,
+        addColumn(id: "lport", title: "Local Port", width: 66, key: .lport,
                   alignment: .right)
-        addColumn(id: "rhost", title: "Remote Host", width: 220, key: .rhost,
+        addColumn(id: "rhost", title: "Remote Host", width: 190, key: .rhost,
                   alignment: .left)
-        addColumn(id: "rport", title: "Remote Port", width: 76, key: .rport,
+        addColumn(id: "rport", title: "Remote Port", width: 70, key: .rport,
                   alignment: .right)
-        addColumn(id: "state", title: "State", width: 88, key: .state, alignment: .left)
+        addColumn(id: "state", title: "State", width: 86, key: .state, alignment: .left)
+        if showProcess {
+            // netstat carries per-connection counters; libproc doesn't, so
+            // these only appear in the system-wide view.
+            addColumn(id: "rcvd", title: "Rcvd", width: 80, key: .rcvd, alignment: .right)
+            addColumn(id: "sent", title: "Sent", width: 80, key: .sent, alignment: .right)
+        }
 
         for col in table.tableColumns { col.resizingMask = [.userResizingMask] }
         table.columnAutoresizingStyle = .noColumnAutoresizing
@@ -224,6 +279,11 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         fitElasticColumn()
     }
 
+    override func viewWillDraw() {
+        super.viewWillDraw()
+        if scroll.contentSize.width != lastFitWidth { fitElasticColumn() }
+    }
+
     /// Frame-based views aren't guaranteed a layout pass when the tab view
     /// resizes them, so refit from the resize itself.
     override func setFrameSize(_ newSize: NSSize) {
@@ -244,6 +304,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
               !elastic.isHidden else { return }
         let clipW = scroll.contentSize.width
         guard clipW > 0 else { return }
+        lastFitWidth = clipW
         isFittingColumns = true
         defer { isFittingColumns = false }
         // Two passes: the first estimates the chrome overhead by assuming the
@@ -295,7 +356,8 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
             }
         }
         switch sortKey {
-        case .process: return byText { self.names[$0.pid] ?? "\($0.pid)" }
+        case .process: return byText { self.processLabel($0) }
+        case .pid:     return by { $0.pid }
         case .proto:   return byText { $0.proto.label }
         case .laddr:   return byText { $0.localAddr }
         case .lport:   return by { $0.localPort }
@@ -303,6 +365,8 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         case .rhost:   return byText { self.remoteHost($0) }
         case .rport:   return by { $0.remotePort }
         case .state:   return byText { ConnectionSampler.stateLabel($0.state) }
+        case .rcvd:    return by { $0.rxBytes ?? -1 }
+        case .sent:    return by { $0.txBytes ?? -1 }
         }
     }
 
@@ -334,24 +398,37 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
                    row: Int) -> NSView? {
         guard let col = tableColumn, row < rows.count else { return nil }
         let id = col.identifier.rawValue
-        let plainText = (id == "process" || id == "proto" || id == "state")
+        let c = rows[row]
+        if id == "process" {
+            let cell = (table.makeView(withIdentifier: col.identifier, owner: self) as? NSTableCellView)
+                ?? ProcessListView.makeNameCell(identifier: col.identifier)
+            cell.imageView?.image = ProcessListView.icon(forExecPath: owners[c.pid]?.execPath ?? "")
+            cell.textField?.stringValue = text(id: id, row: c)
+            return cell
+        }
+        let plainText = (id == "proto" || id == "state")
         let cell = (table.makeView(withIdentifier: col.identifier, owner: self) as? NSTableCellView)
             ?? ProcessListView.makeTextCell(identifier: col.identifier,
                                             monospaced: !plainText,
                                             alignment: plainText ? .left : col.headerCell.alignment)
-        cell.textField?.stringValue = text(id: id, row: rows[row])
+        cell.textField?.stringValue = text(id: id, row: c)
         return cell
     }
 
+    private typealias F = ProcessListView
+
     private func text(id: String, row c: Connection) -> String {
         switch id {
-        case "process": return names[c.pid] ?? "\(c.pid)"
+        case "process": return processLabel(c)
+        case "pid":     return "\(c.pid)"
         case "proto":   return c.proto.label
         case "laddr":   return c.localAddr.isEmpty ? "—" : c.localAddr
         case "lport":   return c.localPort == 0 ? "—" : "\(c.localPort)"
         case "rhost":   return remoteHost(c)
         case "rport":   return c.remotePort == 0 ? "—" : "\(c.remotePort)"
         case "state":   return ConnectionSampler.stateLabel(c.state)
+        case "rcvd":    return c.rxBytes.map(F.formatTotal) ?? "—"
+        case "sent":    return c.txBytes.map(F.formatTotal) ?? "—"
         default:        return ""
         }
     }
