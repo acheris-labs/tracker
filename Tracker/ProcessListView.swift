@@ -85,6 +85,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         var batteryCapacityWh = 0.0        // full charge in watt-hours (0 = unknown)
         var netRxPerSec = 0.0
         var netTxPerSec = 0.0
+        var swapUsedBytes = 0.0
     }
 
     /// AM's View-menu scopes, driven from the toolbar's "…" menu.
@@ -321,6 +322,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
             let stats = FooterStatGrid(rows: [
                 .init(label: "Memory Used:", color: nil),
                 .init(label: "App RSS Total:", color: nil),
+                .init(label: "Swap Used:", color: nil),
             ])
             addPanes([graph, stats, threadsGrid])
             footerUpdate = { [weak self] in
@@ -328,6 +330,8 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
                 stats.setValue(String(format: "%.0f%%", self.systemStats.memoryUsedPct), at: 0)
                 let totalRSS = self.allRows.reduce(0.0) { $0 + $1.rssMB }
                 stats.setValue(Self.formatMB(totalRSS), at: 1)
+                stats.setValue(Self.bytesFormatter.string(
+                    fromByteCount: Int64(self.systemStats.swapUsedBytes)), at: 2)
                 graph.setLayers([self.history.map(\.mem)])
                 self.updateThreadsGrid(threadsGrid)
             }

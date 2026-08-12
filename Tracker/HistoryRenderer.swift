@@ -9,6 +9,7 @@ struct HistoryFrame {
     let diskWrite: Double    // bytes/sec
     let netRx: Double        // bytes/sec
     let netTx: Double        // bytes/sec
+    let swap: Double         // swap used / swap total, 0..1 (0 when no swap)
 }
 
 struct ChartColors {
@@ -19,6 +20,7 @@ struct ChartColors {
     var gpu: NSColor
     var battery: NSColor
     var memory: NSColor
+    var swap: NSColor
     var diskRead: NSColor
     var diskWrite: NSColor
     var netRx: NSColor
@@ -32,6 +34,7 @@ struct ChartColors {
         gpu:       NSColor(srgbRed: 0.70, green: 0.45, blue: 1.00, alpha: 1),
         battery:   NSColor(srgbRed: 1.00, green: 0.85, blue: 0.25, alpha: 1),
         memory:    NSColor(srgbRed: 0.92, green: 0.92, blue: 0.92, alpha: 1),
+        swap:      NSColor(srgbRed: 0.80, green: 0.68, blue: 0.50, alpha: 1),
         // Hue-grouped bytes/sec palette: cool hues = inbound (read/rcvd),
         // warm hues = outbound (write/sent); disk saturated, network pale.
         diskRead:  NSColor(srgbRed: 0.10, green: 0.80, blue: 0.95, alpha: 1),
@@ -46,6 +49,7 @@ struct ChartColors {
         gpu: "Color.gpu",
         battery: "Color.battery",
         memory: "Color.memory",
+        swap: "Color.swap",
         diskRead: "Color.diskRead", diskWrite: "Color.diskWrite",
         netRx: "Color.netRx", netTx: "Color.netTx"
     )
@@ -61,6 +65,7 @@ struct ChartColors {
             gpu:       d.string(forKey: keys.gpu).flatMap(NSColor.fromHex) ?? def.gpu,
             battery:   d.string(forKey: keys.battery).flatMap(NSColor.fromHex) ?? def.battery,
             memory:    d.string(forKey: keys.memory).flatMap(NSColor.fromHex) ?? def.memory,
+            swap:      d.string(forKey: keys.swap).flatMap(NSColor.fromHex) ?? def.swap,
             diskRead:  d.string(forKey: keys.diskRead).flatMap(NSColor.fromHex) ?? def.diskRead,
             diskWrite: d.string(forKey: keys.diskWrite).flatMap(NSColor.fromHex) ?? def.diskWrite,
             netRx:     d.string(forKey: keys.netRx).flatMap(NSColor.fromHex) ?? def.netRx,
@@ -77,6 +82,7 @@ struct ChartColors {
         d.set(gpu.hexString,       forKey: ChartColors.keys.gpu)
         d.set(battery.hexString,   forKey: ChartColors.keys.battery)
         d.set(memory.hexString,    forKey: ChartColors.keys.memory)
+        d.set(swap.hexString,      forKey: ChartColors.keys.swap)
         d.set(diskRead.hexString,  forKey: ChartColors.keys.diskRead)
         d.set(diskWrite.hexString, forKey: ChartColors.keys.diskWrite)
         d.set(netRx.hexString,     forKey: ChartColors.keys.netRx)
@@ -116,13 +122,14 @@ extension NSColor {
 
 /// The selectable traces, CPU stack included.
 enum ChartTrace: String, CaseIterable {
-    case cpu, gpu, battery, memory, disk, network
+    case cpu, gpu, battery, memory, swap, disk, network
     var label: String {
         switch self {
         case .cpu: return "CPU"
         case .gpu: return "GPU"
         case .battery: return "Battery"
         case .memory: return "Memory"
+        case .swap: return "Swap"
         case .disk: return "Disk I/O"
         case .network: return "Network"
         }
@@ -135,7 +142,7 @@ enum TraceSurface { case dock, chart }
 /// A single drawable series — finer-grained than ChartTrace (CPU has four,
 /// disk and network two each). Used for legend-hover highlighting.
 enum ChartSeries: Equatable {
-    case pSys, eSys, pUser, eUser, gpu, battery, memory
+    case pSys, eSys, pUser, eUser, gpu, battery, memory, swap
     case diskRead, diskWrite, netRx, netTx
 }
 
@@ -202,7 +209,7 @@ final class HistoryRenderer {
         self.frames = Array(repeating: HistoryFrame(cpu: CPUFrame(), gpu: 0, battery: 0,
                                                     memory: 0,
                                                     diskRead: 0, diskWrite: 0,
-                                                    netRx: 0, netTx: 0),
+                                                    netRx: 0, netTx: 0, swap: 0),
                             count: Self.maxStorage)
         let total = max(1, numP + numE)
         self.pWeight = Double(numP) / Double(total)
@@ -219,11 +226,11 @@ final class HistoryRenderer {
 
     func append(cpu: CPUFrame, gpu: Double, battery: Double, memory: Double,
                 diskRead: Double, diskWrite: Double,
-                netRx: Double = 0, netTx: Double = 0) {
+                netRx: Double = 0, netTx: Double = 0, swap: Double = 0) {
         frames[head] = HistoryFrame(cpu: cpu, gpu: gpu, battery: battery,
                                     memory: memory,
                                     diskRead: diskRead, diskWrite: diskWrite,
-                                    netRx: netRx, netTx: netTx)
+                                    netRx: netRx, netTx: netTx, swap: swap)
         head = (head + 1) % Self.maxStorage
         if count < Self.maxStorage { count += 1 }
     }
@@ -353,6 +360,14 @@ final class HistoryRenderer {
                          bandY: inner.minY, bandH: cpuH,
                          color: seriesColor(colors.memory, .memory, smoothed: smoothed),
                          smoothed: smoothed) { $0.memory }
+            }
+            if traces.contains(.swap) {
+                // Swap used as a fraction of swap total — rides the left
+                // percentage axis; flat zero while the system has no swap.
+                drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                         bandY: inner.minY, bandH: cpuH,
+                         color: seriesColor(colors.swap, .swap, smoothed: smoothed),
+                         smoothed: smoothed) { $0.swap }
             }
             // Disk and network share one LOGARITHMIC bytes/sec scale: linear
             // sharing would let either family's burst flatten the other, and

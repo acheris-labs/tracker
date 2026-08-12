@@ -40,6 +40,7 @@ final class PreferencesWindowController: NSWindowController {
         ]
         if hasBattery { rows.append(("Battery", \.battery)) }
         rows.append(("Memory",     \.memory))
+        rows.append(("Swap",       \.swap))
         rows.append(("Disk read",  \.diskRead))
         rows.append(("Disk write", \.diskWrite))
         rows.append(("Net received", \.netRx))
@@ -202,6 +203,7 @@ final class PreferencesWindowController: NSWindowController {
         traceRow("GPU:", .gpu, wells: [idx("GPU")])
         if hasBattery { traceRow("Battery:", .battery, wells: [idx("Battery")]) }
         traceRow("Memory:", .memory, wells: [idx("Memory")])
+        traceRow("Swap:", .swap, wells: [idx("Swap")])
         traceRow("Disk I/O:", .disk, wells: [idx("Disk read"), idx("Disk write")])
         traceRow("Network:", .network, wells: [idx("Net received"), idx("Net sent")])
 

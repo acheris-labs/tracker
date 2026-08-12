@@ -134,7 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chart?.refresh(cpu: lastCPU, gpu: lastGPU, battery: lastBatteryInfo,
                        memory: lastMemory,
                        diskRead: lastDiskRead, diskWrite: lastDiskWrite,
-                       netRx: network.totals.rxPerSec, netTx: network.totals.txPerSec)
+                       netRx: network.totals.rxPerSec, netTx: network.totals.txPerSec,
+                       swapUsed: SwapUsage.current().used)
         // Populate processes immediately rather than waiting up to a full
         // refresh interval. Reset the sampler if the window was closed so
         // CPU% / disk / power don't average over the time we were idle.
@@ -466,14 +467,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             network.kick()
         }
         let netTotals = network.totals
+        let swap = SwapUsage.current()
+        let swapFraction = swap.total > 0 ? swap.used / swap.total : 0
         renderer.append(cpu: f, gpu: g, battery: bi.percent, memory: m,
                         diskRead: dr, diskWrite: dw,
-                        netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec)
+                        netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec,
+                        swap: swapFraction)
         NSApp.applicationIconImage = renderer.render()
         updateDockBadge(bi)
         chart?.refresh(cpu: f, gpu: g, battery: bi, memory: m,
                        diskRead: dr, diskWrite: dw,
-                       netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec)
+                       netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec,
+                       swapUsed: swap.used)
 
         // Only pay the per-process sampling cost when someone is looking,
         // and only at the user-chosen interval (default 2s).
@@ -523,7 +528,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             batteryMinutesToEmpty: b.minutesToEmpty,
             batteryCapacityWh: b.capacityWh,
             netRxPerSec: network.totals.rxPerSec,
-            netTxPerSec: network.totals.txPerSec))
+            netTxPerSec: network.totals.txPerSec,
+            swapUsedBytes: SwapUsage.current().used))
     }
 
     private func buildMainMenu() -> NSMenu {

@@ -38,3 +38,15 @@ final class MemorySampler {
         return min(1.0, Double(used) / Double(totalBytes))
     }
 }
+
+/// System swap usage via sysctl vm.swapusage (what Activity Monitor's
+/// "Swap Used" reports).
+enum SwapUsage {
+    static func current() -> (used: Double, total: Double) {
+        var usage = xsw_usage()
+        var size = MemoryLayout<xsw_usage>.size
+        var mib: [Int32] = [CTL_VM, VM_SWAPUSAGE]
+        guard sysctl(&mib, 2, &usage, &size, nil, 0) == 0 else { return (0, 0) }
+        return (Double(usage.xsu_used), Double(usage.xsu_total))
+    }
+}

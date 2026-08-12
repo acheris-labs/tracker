@@ -134,6 +134,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     private var eUserChip: LegendChip!
     private var gpuChip: LegendChip!
     private var memoryChip: LegendChip!
+    private var swapChip: LegendChip!
     private var batteryChip: LegendChip?
     private var powerChip: LegendChip?
     private var timeChip: LegendChip?
@@ -206,11 +207,11 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
     func refresh(cpu: CPUFrame, gpu: Double, battery: BatteryInfo,
                  memory: Double, diskRead: Double, diskWrite: Double,
-                 netRx: Double = 0, netTx: Double = 0) {
+                 netRx: Double = 0, netTx: Double = 0, swapUsed: Double = 0) {
         chartView.needsDisplay = true
         updateChips(cpu: cpu, gpu: gpu, battery: battery,
                     memory: memory, diskRead: diskRead, diskWrite: diskWrite,
-                    netRx: netRx, netTx: netTx)
+                    netRx: netRx, netTx: netTx, swapUsed: swapUsed)
         updateRightAxis()
         applyCurrentColors()
     }
@@ -251,6 +252,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         eUserChip  = LegendChip(name: "E-user", color: c0)
         gpuChip    = LegendChip(name: "GPU",    color: c0)
         memoryChip = LegendChip(name: "Memory", color: c0)
+        swapChip   = LegendChip(name: "Swap",   color: c0)
         if hasBattery {
             batteryChip = LegendChip(name: "Battery", color: c0)
             // Power and Time have no chart line; clear dot keeps alignment.
@@ -281,6 +283,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         hover(gpuChip, .gpu)
         hover(batteryChip, .battery)
         hover(memoryChip, .memory)
+        hover(swapChip, .swap)
         hover(readChip, .diskRead)
         hover(writeChip, .diskWrite)
         hover(netRxChip, .netRx)
@@ -288,7 +291,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
         let cpuCol  = Self.legendColumn(title: "Processor",
                                         chips: [pSysChip, eSysChip, pUserChip, eUserChip])
-        var sysChips: [LegendChip] = [gpuChip, memoryChip]
+        var sysChips: [LegendChip] = [gpuChip, memoryChip, swapChip]
         if let b = batteryChip { sysChips.append(b) }
         if let p = powerChip   { sysChips.append(p) }
         if let t = timeChip    { sysChips.append(t) }
@@ -702,6 +705,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         eUserChip.setColor(c.eUser)
         gpuChip.setColor(c.gpu)
         memoryChip.setColor(c.memory)
+        swapChip.setColor(c.swap)
         batteryChip?.setColor(c.battery)
         readChip.setColor(c.diskRead)
         writeChip.setColor(c.diskWrite)
@@ -723,13 +727,14 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
     private func updateChips(cpu: CPUFrame, gpu: Double, battery: BatteryInfo,
                              memory: Double, diskRead: Double, diskWrite: Double,
-                             netRx: Double, netTx: Double) {
+                             netRx: Double, netTx: Double, swapUsed: Double) {
         pSysChip.setValue(pct(cpu.pSys))
         eSysChip.setValue(pct(cpu.eSys))
         pUserChip.setValue(pct(cpu.pUser))
         eUserChip.setValue(pct(cpu.eUser))
         gpuChip.setValue(pct(gpu))
         memoryChip.setValue(pct(memory))
+        swapChip.setValue(Self.bytesFormatter.string(fromByteCount: Int64(swapUsed)))
         batteryChip?.setValue(pct(battery.percent))
         powerChip?.setValue(formatPower(watts: battery.watts, onAC: battery.externalConnected))
         timeChip?.setValue(formatBatteryTime(battery))
