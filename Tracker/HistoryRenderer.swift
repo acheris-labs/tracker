@@ -32,10 +32,12 @@ struct ChartColors {
         gpu:       NSColor(srgbRed: 0.70, green: 0.45, blue: 1.00, alpha: 1),
         battery:   NSColor(srgbRed: 1.00, green: 0.85, blue: 0.25, alpha: 1),
         memory:    NSColor(srgbRed: 0.92, green: 0.92, blue: 0.92, alpha: 1),
-        diskRead:  NSColor(srgbRed: 0.20, green: 0.85, blue: 0.85, alpha: 1),
-        diskWrite: NSColor(srgbRed: 0.98, green: 0.45, blue: 0.75, alpha: 1),
-        netRx:     NSColor(srgbRed: 0.25, green: 0.95, blue: 0.65, alpha: 1),
-        netTx:     NSColor(srgbRed: 1.00, green: 0.55, blue: 0.55, alpha: 1)
+        // Hue-grouped bytes/sec palette: cool hues = inbound (read/rcvd),
+        // warm hues = outbound (write/sent); disk saturated, network pale.
+        diskRead:  NSColor(srgbRed: 0.10, green: 0.80, blue: 0.95, alpha: 1),
+        diskWrite: NSColor(srgbRed: 1.00, green: 0.30, blue: 0.45, alpha: 1),
+        netRx:     NSColor(srgbRed: 0.65, green: 0.90, blue: 1.00, alpha: 1),
+        netTx:     NSColor(srgbRed: 1.00, green: 0.72, blue: 0.62, alpha: 1)
     )
 
     private static let keys = (
@@ -130,6 +132,13 @@ enum ChartTrace: String, CaseIterable {
 /// Which surface a trace set customizes.
 enum TraceSurface { case dock, chart }
 
+/// A single drawable series — finer-grained than ChartTrace (CPU has four,
+/// disk and network two each). Used for legend-hover highlighting.
+enum ChartSeries: Equatable {
+    case pSys, eSys, pUser, eUser, gpu, battery, memory
+    case diskRead, diskWrite, netRx, netTx
+}
+
 final class HistoryRenderer {
     // Storage holds up to `maxStorage` recent samples; two independent view
     // windows select how many of the most recent samples each surface draws:
@@ -167,6 +176,18 @@ final class HistoryRenderer {
     // short "right now" essentials, the chart the full picture.
     var iconTraces: Set<ChartTrace> = [.cpu, .gpu]
     var chartTraces: Set<ChartTrace> = [.cpu, .gpu]
+
+    /// While set, the chart draws this series at full strength and dims the
+    /// rest (legend hover). The dock icon ignores it.
+    var highlightedSeries: ChartSeries?
+
+    /// The series' colour, dimmed toward neutral when another series is
+    /// highlighted. Blending (not alpha) keeps the band-alpha math intact.
+    private func seriesColor(_ base: NSColor, _ series: ChartSeries,
+                             smoothed: Bool) -> NSColor {
+        guard smoothed, let h = highlightedSeries, h != series else { return base }
+        return base.blended(withFraction: 0.75, of: NSColor(white: 0.35, alpha: 1)) ?? base
+    }
 
     init(iconCapacity: Int, chartCapacity: Int, numP: Int, numE: Int,
          hasBattery: Bool, colors: ChartColors) {
@@ -321,12 +342,14 @@ final class HistoryRenderer {
             if traces.contains(.battery), hasBattery {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
-                         color: colors.battery, smoothed: smoothed) { $0.battery }
+                         color: seriesColor(colors.battery, .battery, smoothed: smoothed),
+                         smoothed: smoothed) { $0.battery }
             }
             if traces.contains(.memory) {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
-                         color: colors.memory, smoothed: smoothed) { $0.memory }
+                         color: seriesColor(colors.memory, .memory, smoothed: smoothed),
+                         smoothed: smoothed) { $0.memory }
             }
             // Disk and network share one LOGARITHMIC bytes/sec scale: linear
             // sharing would let either family's burst flatten the other, and
@@ -336,24 +359,28 @@ final class HistoryRenderer {
                 if traces.contains(.network) {
                     drawLine(visible: visible, xOffset: xOffset, colW: colW,
                              bandY: inner.minY, bandH: cpuH,
-                             color: colors.netRx, lineWidth: 1.25, smoothed: smoothed) {
+                             color: seriesColor(colors.netRx, .netRx, smoothed: smoothed),
+                             lineWidth: 1.25, smoothed: smoothed) {
                         Self.logNorm($0.netRx, maxRate: maxRate)
                     }
                     drawLine(visible: visible, xOffset: xOffset, colW: colW,
                              bandY: inner.minY, bandH: cpuH,
-                             color: colors.netTx, lineWidth: 1.25, smoothed: smoothed) {
+                             color: seriesColor(colors.netTx, .netTx, smoothed: smoothed),
+                             lineWidth: 1.25, smoothed: smoothed) {
                         Self.logNorm($0.netTx, maxRate: maxRate)
                     }
                 }
                 if traces.contains(.disk) {
                     drawLine(visible: visible, xOffset: xOffset, colW: colW,
                              bandY: inner.minY, bandH: cpuH,
-                             color: colors.diskRead, lineWidth: 1.25, smoothed: smoothed) {
+                             color: seriesColor(colors.diskRead, .diskRead, smoothed: smoothed),
+                             lineWidth: 1.25, smoothed: smoothed) {
                         Self.logNorm($0.diskRead, maxRate: maxRate)
                     }
                     drawLine(visible: visible, xOffset: xOffset, colW: colW,
                              bandY: inner.minY, bandH: cpuH,
-                             color: colors.diskWrite, lineWidth: 1.25, smoothed: smoothed) {
+                             color: seriesColor(colors.diskWrite, .diskWrite, smoothed: smoothed),
+                             lineWidth: 1.25, smoothed: smoothed) {
                         Self.logNorm($0.diskWrite, maxRate: maxRate)
                     }
                 }
@@ -363,14 +390,18 @@ final class HistoryRenderer {
         if visible > 1, traces.contains(.gpu), smoothed {
             drawLine(visible: visible, xOffset: xOffset, colW: colW,
                      bandY: inner.minY, bandH: cpuH,
-                     color: colors.gpu, smoothed: true,
+                     color: seriesColor(colors.gpu, .gpu, smoothed: true),
+                     smoothed: true,
                      glowDepth: Self.gpuGlowDepth) { $0.gpu }
         }
 
         if traces.contains(.cpu), smoothed {
             drawCPUArea(visible: visible, xOffset: xOffset, colW: colW,
                         baseY: inner.minY, cpuH: cpuH,
-                        colors: [pSysColor, eSysColor, pUsrColor, eUsrColor])
+                        colors: [seriesColor(pSysColor, .pSys, smoothed: true),
+                                 seriesColor(eSysColor, .eSys, smoothed: true),
+                                 seriesColor(pUsrColor, .pUser, smoothed: true),
+                                 seriesColor(eUsrColor, .eUser, smoothed: true)])
         } else if traces.contains(.cpu) {
             for i in 0..<visible {
                 let f = frames[visibleIndex(i)]

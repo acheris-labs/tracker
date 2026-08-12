@@ -87,6 +87,21 @@ final class LegendChip: NSView {
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
 
+    /// Legend hover: fires true on enter, false on exit.
+    var onHover: ((Bool) -> Void)?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
+
     func setValue(_ s: String)  { valueLabel.stringValue = s }
     func setColor(_ c: NSColor) { dot.layer?.backgroundColor = c.cgColor }
 }
@@ -246,6 +261,30 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         writeChip  = LegendChip(name: "Write", color: c0)
         netRxChip  = LegendChip(name: "Rcvd",  color: c0)
         netTxChip  = LegendChip(name: "Sent",  color: c0)
+
+        // Legend hover → highlight that series in the chart, dim the rest.
+        func hover(_ chip: LegendChip?, _ series: ChartSeries) {
+            chip?.onHover = { [weak self] inside in
+                guard let self, let r = self.renderer else { return }
+                if inside {
+                    r.highlightedSeries = series
+                } else if r.highlightedSeries == series {
+                    r.highlightedSeries = nil
+                }
+                self.chartView.needsDisplay = true
+            }
+        }
+        hover(pSysChip, .pSys)
+        hover(eSysChip, .eSys)
+        hover(pUserChip, .pUser)
+        hover(eUserChip, .eUser)
+        hover(gpuChip, .gpu)
+        hover(batteryChip, .battery)
+        hover(memoryChip, .memory)
+        hover(readChip, .diskRead)
+        hover(writeChip, .diskWrite)
+        hover(netRxChip, .netRx)
+        hover(netTxChip, .netTx)
 
         let cpuCol  = Self.legendColumn(title: "Processor",
                                         chips: [pSysChip, eSysChip, pUserChip, eUserChip])
