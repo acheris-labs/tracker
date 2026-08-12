@@ -121,7 +121,10 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     /// Full process name where we have it: netstat truncates to 16 characters,
     /// but our own process list knows the whole thing.
     private func processLabel(_ c: Connection) -> String {
-        owner(c.pid)?.name ?? "—"
+        // A socket outlives its process — Time Wait lingers for minutes — so an
+        // unresolvable pid usually means the process has exited, not that we
+        // failed to look it up.
+        owner(c.pid)?.name ?? "(exited)"
     }
 
     /// The app's process list covers almost everything; anything newer than the
@@ -231,7 +234,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
                   alignment: .right)
         addColumn(id: "rhost", title: "Remote Host", width: 190, key: .rhost,
                   alignment: .left)
-        addColumn(id: "rport", title: "Remote Port", width: 66, key: .rport,
+        addColumn(id: "rport", title: "Remote Port", width: 94, key: .rport,
                   alignment: .right)
         addColumn(id: "state", title: "State", width: 80, key: .state, alignment: .left)
         if showProcess {
