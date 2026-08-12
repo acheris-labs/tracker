@@ -8,6 +8,7 @@ struct ProcessSnapshot {
     let user: String
     let cpuPercent: Double   // percent of one core; 100% = one full core
     let rssMB: Double
+    let vsizeMB: Double         // virtual size, for the inspector's Memory tab
     let threads: Int
     let diskReadBytesPerSec: Double
     let diskWriteBytesPerSec: Double
@@ -19,6 +20,7 @@ struct ProcessSnapshot {
     let idleWakeups: Int        // package idle wake-ups during the interval
     let isTranslated: Bool      // running under Rosetta → Kind = Intel
     let execPath: String        // executable path, for the process icon
+    let ppid: Int32             // parent pid (0 if unknown)
 
     // Network, merged in by the app from NetworkSampler (nettop) after
     // sampling — zero for processes with no sockets.
@@ -184,17 +186,21 @@ final class ProcessSampler {
             proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, ptr,
                          Int32(MemoryLayout<proc_bsdinfo>.size))
         }
-        let uid: uid_t = (bi == Int32(MemoryLayout<proc_bsdinfo>.size)) ? bsd.pbi_uid : 0
+        let bsdOK = bi == Int32(MemoryLayout<proc_bsdinfo>.size)
+        let uid: uid_t = bsdOK ? bsd.pbi_uid : 0
+        let ppid: Int32 = bsdOK ? Int32(bsd.pbi_ppid) : 0
 
         let name = procName(pid: pid)
         let user = username(uid: uid)
         let rssMB = Double(taskInfo.pti_resident_size) / (1024 * 1024)
+        let vsizeMB = Double(taskInfo.pti_virtual_size) / (1024 * 1024)
         let threads = Int(taskInfo.pti_threadnum)
         let cpuTimeSeconds = Double(totalNanos) / 1_000_000_000.0
         let energyJoules = Double(rEnergy) / 1_000_000_000.0  // nanojoules → joules
 
         return ProcessSnapshot(pid: pid, name: name, user: user,
                                cpuPercent: cpuPercent, rssMB: rssMB,
+                               vsizeMB: vsizeMB,
                                threads: threads,
                                diskReadBytesPerSec: diskReadPerSec,
                                diskWriteBytesPerSec: diskWritePerSec,
@@ -205,7 +211,8 @@ final class ProcessSampler {
                                cpuTimeSeconds: cpuTimeSeconds,
                                idleWakeups: idleWakeups,
                                isTranslated: translated(pid: pid),
-                               execPath: path(pid: pid))
+                               execPath: path(pid: pid),
+                               ppid: ppid)
     }
 
     /// Executable path, cached for the pid's lifetime (used for the icon).

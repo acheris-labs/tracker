@@ -23,6 +23,7 @@
 		AA0000000000000000000036 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000035 /* Theme.swift */; };
 		AA0000000000000000000038 /* FooterPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000037 /* FooterPanes.swift */; };
 		AA000000000000000000003A /* NetworkSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000039 /* NetworkSampler.swift */; };
+		AA000000000000000000003C /* InspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003B /* InspectorPanel.swift */; };
 		AA0000000000000000000034 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000033 /* Sparkle */; };
 		AA000000000000000000001B /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001A /* AppKit.framework */; };
 		AA000000000000000000001D /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001C /* IOKit.framework */; };
@@ -46,6 +47,7 @@
 		AA0000000000000000000035 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		AA0000000000000000000037 /* FooterPanes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FooterPanes.swift; sourceTree = "<group>"; };
 		AA0000000000000000000039 /* NetworkSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSampler.swift; sourceTree = "<group>"; };
+		AA000000000000000000003B /* InspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorPanel.swift; sourceTree = "<group>"; };
 		AA0000000000000000000019 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA000000000000000000001A /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
 		AA000000000000000000001C /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
@@ -111,6 +113,7 @@
 				AA0000000000000000000035 /* Theme.swift */,
 				AA0000000000000000000037 /* FooterPanes.swift */,
 				AA0000000000000000000039 /* NetworkSampler.swift */,
+				AA000000000000000000003B /* InspectorPanel.swift */,
 				AA0000000000000000000029 /* Tracker.icns */,
 				AA0000000000000000000019 /* Info.plist */,
 			);
@@ -205,6 +208,7 @@
 				AA0000000000000000000036 /* Theme.swift in Sources */,
 				AA0000000000000000000038 /* FooterPanes.swift in Sources */,
 				AA000000000000000000003A /* NetworkSampler.swift in Sources */,
+				AA000000000000000000003C /* InspectorPanel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

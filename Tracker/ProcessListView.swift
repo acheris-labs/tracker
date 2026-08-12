@@ -113,7 +113,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     /// Process icons, cached by executable path (an icon never changes for a path).
     private var iconCache: [String: NSImage] = [:]
 
-    private static let bytesFormatter: ByteCountFormatter = {
+    static let bytesFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
         f.countStyle = .binary
         f.allowedUnits = [.useKB, .useMB, .useGB]
@@ -137,6 +137,10 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     func setSnapshots(_ s: [ProcessSnapshot]) {
         allRows = s
         applyFilterAndSort()
+        for (pid, panel) in inspectors {
+            let snap = s.first { $0.pid == pid }
+            panel.update(with: snap, parentName: snap.flatMap { parentName(of: $0) })
+        }
     }
 
     /// Filter `allRows` by the search text, then sort, then redraw.
@@ -295,7 +299,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
                 guard let self else { return }
                 stats.setValue(String(format: "%.0f%%", self.systemStats.memoryUsedPct), at: 0)
                 let totalRSS = self.allRows.reduce(0.0) { $0 + $1.rssMB }
-                stats.setValue(self.formatMB(totalRSS), at: 1)
+                stats.setValue(Self.formatMB(totalRSS), at: 1)
                 graph.setLayers([self.history.map(\.mem)])
                 self.updateThreadsGrid(threadsGrid)
             }
@@ -400,16 +404,16 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         guard s.hasBattery else { return "—" }
         let flowing = s.batteryWatts >= 0.1
         if flowing, s.batteryCharging, let m = s.batteryMinutesToFull {
-            return "full in \(formatMinutes(m))"
+            return "full in \(Self.formatMinutes(m))"
         }
         if flowing, !s.batteryCharging, let m = s.batteryMinutesToEmpty {
-            return "empty in \(formatMinutes(m))"
+            return "empty in \(Self.formatMinutes(m))"
         }
         if s.batteryExternal { return "on AC" }
         return "—"
     }
 
-    private func formatMinutes(_ m: Int) -> String {
+    static func formatMinutes(_ m: Int) -> String {
         if m < 60 { return "\(m)m" }
         return "\(m / 60)h \(m % 60)m"
     }
@@ -710,20 +714,35 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         if a.runModal() == .alertFirstButtonReturn { sendSignal(SIGKILL, to: snap.pid) }
     }
 
+    /// Live inspector panels, one per pid; updated from setSnapshots.
+    private var inspectors: [pid_t: InspectorPanelController] = [:]
+
     @objc func inspectSelected() {
         guard let r = selectedRowIndex() else { NSSound.beep(); return }
-        let s = rows[r]
-        let a = NSAlert()
-        a.messageText = "\(s.name)  (\(s.pid))"
-        a.informativeText = """
-            User: \(s.user)    Kind: \(s.isTranslated ? "Intel" : "Apple")
-            CPU: \(String(format: "%.1f", s.cpuPercent))%    CPU Time: \(formatCPUTime(s.cpuTimeSeconds))
-            Memory: \(formatMB(s.rssMB))    Threads: \(s.threads)    Idle wakes: \(s.idleWakeups)
-            Power: \(formatPower(s.powerWatts))    Disk R/W: \(formatRate(s.diskReadBytesPerSec)) / \(formatRate(s.diskWriteBytesPerSec))
-            Path: \(s.execPath.isEmpty ? "—" : s.execPath)
-            """
-        a.addButton(withTitle: "OK")
-        a.runModal()
+        let snap = rows[r]
+        if let existing = inspectors[snap.pid] {
+            existing.window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        let panel = InspectorPanelController(snapshot: snap,
+                                             icon: icon(forExecPath: snap.execPath))
+        panel.onClose = { [weak self] in self?.inspectors[snap.pid] = nil }
+        inspectors[snap.pid] = panel
+        panel.update(with: snap, parentName: parentName(of: snap))
+        panel.showWindow(nil)
+        panel.window?.makeKeyAndOrderFront(nil)
+    }
+
+    private func parentName(of snap: ProcessSnapshot) -> String? {
+        guard snap.ppid > 0 else { return nil }
+        if let name = allRows.first(where: { $0.pid == snap.ppid })?.name {
+            return name
+        }
+        // Parents we can't fully sample (e.g. root's launchd) still have a
+        // name via proc_name.
+        var buf = [CChar](repeating: 0, count: 256)
+        let n = proc_name(snap.ppid, &buf, UInt32(buf.count))
+        return n > 0 ? String(cString: buf) : nil
     }
 
     /// User dragged a column divider. Name: remember it and stop auto-fill.
@@ -786,27 +805,27 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private func cellText(id: String, snap: ProcessSnapshot) -> String {
         switch id {
         case "cpu":     return String(format: "%.1f", snap.cpuPercent)
-        case "cputime": return formatCPUTime(snap.cpuTimeSeconds)
-        case "memory":  return formatMB(snap.rssMB)
+        case "cputime": return Self.formatCPUTime(snap.cpuTimeSeconds)
+        case "memory":  return Self.formatMB(snap.rssMB)
         case "threads": return "\(snap.threads)"
         case "idle":    return "\(snap.idleWakeups)"
         case "kind":    return snap.isTranslated ? "Intel" : "Apple"
-        case "read":    return formatRate(snap.diskReadBytesPerSec)
-        case "write":   return formatRate(snap.diskWriteBytesPerSec)
-        case "rtotal":  return formatTotal(snap.diskReadTotal)
-        case "netrx":   return formatRate(snap.netRxBytesPerSec)
-        case "nettx":   return formatRate(snap.netTxBytesPerSec)
-        case "netrxtotal": return formatTotal(snap.netRxTotal)
-        case "nettxtotal": return formatTotal(snap.netTxTotal)
-        case "netrxpkts": return formatCount(snap.netRxPackets)
-        case "nettxpkts": return formatCount(snap.netTxPackets)
+        case "read":    return Self.formatRate(snap.diskReadBytesPerSec)
+        case "write":   return Self.formatRate(snap.diskWriteBytesPerSec)
+        case "rtotal":  return Self.formatTotal(snap.diskReadTotal)
+        case "netrx":   return Self.formatRate(snap.netRxBytesPerSec)
+        case "nettx":   return Self.formatRate(snap.netTxBytesPerSec)
+        case "netrxtotal": return Self.formatTotal(snap.netRxTotal)
+        case "nettxtotal": return Self.formatTotal(snap.netTxTotal)
+        case "netrxpkts": return Self.formatCount(snap.netRxPackets)
+        case "nettxpkts": return Self.formatCount(snap.netTxPackets)
         case "sleep":   return snap.preventsSleep ? "Yes" : "—"
-        case "wtotal":  return formatTotal(snap.diskWriteTotal)
-        case "power":   return formatPower(snap.powerWatts)
+        case "wtotal":  return Self.formatTotal(snap.diskWriteTotal)
+        case "power":   return Self.formatPower(snap.powerWatts)
         case "drain":
             let cap = systemStats.batteryCapacityWh
             return cap > 0 ? String(format: "%.2f%%/hr", snap.powerWatts / cap * 100) : "—"
-        case "energy":  return formatEnergy(snap.energyJoules)
+        case "energy":  return Self.formatEnergy(snap.energyJoules)
         case "batt":
             let cap = systemStats.batteryCapacityWh
             return cap > 0 ? String(format: "%.2f%%", (snap.energyJoules / 3600.0) / cap * 100) : "—"
@@ -897,7 +916,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
 
     /// CPU time like Activity Monitor: "S.ss", "M:SS.ss", or "H:MM:SS.ss".
-    private func formatCPUTime(_ total: Double) -> String {
+    static func formatCPUTime(_ total: Double) -> String {
         let whole = Int(total)
         let h = whole / 3600
         let m = (whole % 3600) / 60
@@ -907,14 +926,14 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         return String(format: "%.2f", total)
     }
 
-    private func formatMB(_ mb: Double) -> String {
+    static func formatMB(_ mb: Double) -> String {
         if mb >= 1024 { return String(format: "%.1f GB", mb / 1024) }
         if mb >= 1   { return String(format: "%.0f MB", mb) }
         return String(format: "%.1f MB", mb)
     }
 
     /// Whole counts with thousands separators, "—" for zero (AM style).
-    private func formatCount(_ n: Double) -> String {
+    static func formatCount(_ n: Double) -> String {
         if n < 1 { return "—" }
         return Self.countFormatter.string(from: NSNumber(value: Int64(n))) ?? "\(Int64(n))"
     }
@@ -925,25 +944,25 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         return f
     }()
 
-    private func formatRate(_ bytesPerSec: Double) -> String {
+    static func formatRate(_ bytesPerSec: Double) -> String {
         if bytesPerSec < 1024 { return "—" }
         return Self.bytesFormatter.string(fromByteCount: Int64(bytesPerSec))
     }
 
     /// Cumulative byte total (lifetime), e.g. "1.2 GB"; "—" when nothing yet.
-    private func formatTotal(_ bytes: Double) -> String {
+    static func formatTotal(_ bytes: Double) -> String {
         if bytes < 1 { return "—" }
         return Self.bytesFormatter.string(fromByteCount: Int64(bytes))
     }
 
-    private func formatPower(_ watts: Double) -> String {
+    static func formatPower(_ watts: Double) -> String {
         if watts < 0.001 { return "—" }
         if watts < 1     { return String(format: "%.0f mW", watts * 1000) }
         return String(format: "%.2f W", watts)
     }
 
     /// Cumulative energy (joules) → human Wh / mWh.
-    private func formatEnergy(_ joules: Double) -> String {
+    static func formatEnergy(_ joules: Double) -> String {
         let wh = joules / 3600.0
         if wh < 0.001  { return "—" }
         if wh < 1      { return String(format: "%.0f mWh", wh * 1000) }

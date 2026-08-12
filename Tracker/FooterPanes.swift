@@ -41,8 +41,13 @@ final class FooterStatGrid: NSView {
     }
 
     private var valueFields: [NSTextField] = []
+    private let pinned: Bool
 
-    init(rows: [Row]) {
+    /// `pinned` gives the grid an intrinsic height (stack pinned to the top
+    /// and bottom edges) for use outside the fixed-height footer panes, where
+    /// the default centerY-only pin would leave the height ambiguous.
+    init(rows: [Row], pinned: Bool = false) {
+        self.pinned = pinned
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         var views: [NSView] = []
@@ -72,11 +77,19 @@ final class FooterStatGrid: NSView {
         stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
-        NSLayoutConstraint.activate([
+        var constraints = [
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        ]
+        if pinned {
+            constraints += [
+                stack.topAnchor.constraint(equalTo: topAnchor),
+                stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ]
+        } else {
+            constraints.append(stack.centerYAnchor.constraint(equalTo: centerYAnchor))
+        }
+        NSLayoutConstraint.activate(constraints)
     }
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
