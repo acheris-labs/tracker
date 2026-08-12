@@ -276,9 +276,14 @@ final class ProcessSampler {
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.size
         guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
-        let name = withUnsafeBytes(of: info.kp_proc.p_comm) { raw in
+        let comm = withUnsafeBytes(of: info.kp_proc.p_comm) { raw in
             String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
         }
+        // p_comm is capped at 16 characters, and it carries no path so the row
+        // would get a generic icon. proc_pidpath works for other users'
+        // processes too and gives both in full.
+        let execPath = path(pid: pid)
+        let name = execPath.isEmpty ? comm : (execPath as NSString).lastPathComponent
         guard !name.isEmpty else { return nil }
         return ProcessSnapshot(pid: pid, name: name,
                                user: username(uid: info.kp_eproc.e_ucred.cr_uid),
@@ -288,7 +293,7 @@ final class ProcessSampler {
                                diskReadTotal: 0, diskWriteTotal: 0,
                                powerWatts: 0, energyJoules: 0,
                                cpuTimeSeconds: 0, idleWakeups: 0,
-                               isTranslated: false, execPath: "",
+                               isTranslated: false, execPath: execPath,
                                ppid: Int32(info.kp_eproc.e_ppid))
     }
 

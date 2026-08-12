@@ -44,6 +44,11 @@ auto-update prompt.
   app's override, since it's drawn on the Dock's own material.
 
 ### Fixed
+- **Other users' processes now show their real name and icon** in the process
+  tabs. Their name came from the kernel's 16-character `p_comm` field with no
+  executable path, so long names were cut ("AddressBookSourceSy…") and every
+  one of them drew a generic icon; both now come from the executable path,
+  which is readable for any process.
 - Footer panes and the chart card kept their borders from the appearance they
   were created in, so the outlines disappeared after an appearance switch.
 

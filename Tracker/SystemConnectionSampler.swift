@@ -6,10 +6,13 @@ import Foundation
 /// libproc can only enumerate descriptors for processes we own — barely half of
 /// them — so a view that claims to show *all* connections can't be built on it.
 /// netstat sees every socket, attributes each to a `process:pid`, and throws in
-/// per-connection byte counters for free. Its two costs are handled here: the
-/// process column is truncated to 16 characters (repaired from our own process
-/// list, which has the full name), and long IPv6 addresses are truncated
-/// (repaired from libproc where the process is ours).
+/// per-connection byte counters for free.
+///
+/// Only the *pid* is taken from netstat's process column: the text there is
+/// truncated to 16 characters and contains spaces, whereas proc_pidpath gives
+/// the full executable path for any pid, our own or not. Long IPv6 addresses
+/// are also truncated to the column width, and those are repaired from libproc
+/// where the socket belongs to us.
 enum SystemConnectionSampler {
     /// Runs netstat and parses it. Blocking, ~20-50 ms — call off the main
     /// thread.
@@ -39,10 +42,6 @@ enum SystemConnectionSampler {
     /// A row looks like:
     ///   tcp4 0 0 192.168.2.177.55958 44.239.150.10.443 ESTABLISHED \
     ///     16800 10733 131072 131768 Brave Browser He:34504 00102 … 000000
-    ///
-    /// Parsed from both ends, because the process name contains spaces: the
-    /// eight trailing columns are fixed, so the token before them ends in
-    /// `:pid`, and the name runs left from there until the first numeric field.
     private static func parse(_ line: Substring) -> Connection? {
         let t = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard t.count >= 14 else { return nil }   // headers and blank lines
@@ -50,14 +49,13 @@ enum SystemConnectionSampler {
         let protoName = t[0].replacingOccurrences(of: "46", with: "6")
         guard let proto = ConnectionProto(rawValue: protoName) else { return nil }
 
-        let pidIndex = t.count - 9
-        guard pidIndex > 4, let colon = t[pidIndex].lastIndex(of: ":"),
-              let pid = pid_t(t[pidIndex][t[pidIndex].index(after: colon)...]) else { return nil }
-
-        var nameParts = [String(t[pidIndex][..<colon])]
-        var i = pidIndex - 1
-        while i > 4, Int(t[i]) == nil { nameParts.insert(t[i], at: 0); i -= 1 }
-        let name = nameParts.joined(separator: " ")
+        // The process column is the only field after the addresses that has a
+        // colon in it — everything trailing it is hex or decimal — so find it
+        // from the right and keep just the pid. Its name text is truncated and
+        // may contain spaces; proc_pidpath does that job properly.
+        guard let pidField = t[5...].last(where: { $0.contains(":") }),
+              let colon = pidField.lastIndex(of: ":"),
+              let pid = pid_t(pidField[pidField.index(after: colon)...]) else { return nil }
 
         // TCP rows carry a state before the byte counters; UDP rows don't.
         let hasState = tcpStates[t[5]] != nil
@@ -74,7 +72,6 @@ enum SystemConnectionSampler {
                           localAddr: localAddr, localPort: localPort,
                           remoteAddr: remoteAddr, remotePort: remotePort,
                           state: state,
-                          processName: name.isEmpty ? nil : name,
                           rxBytes: Double(t[rxIndex]),
                           txBytes: Double(t[rxIndex + 1]))
     }

@@ -23,6 +23,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     private var all: [Connection] = []            // before the filter
     private var rows: [Connection] = []           // displayed
     private var owners: [pid_t: ProcessOwner] = [:]
+    private var resolvedOwners: [pid_t: ProcessOwner?] = [:]
     private var filter = ""
     private var shown: Set<Connection> = []       // identity half of the no-op diff
     private var shownBytes: Double = 0            // byte half of it
@@ -116,7 +117,18 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     /// Full process name where we have it: netstat truncates to 16 characters,
     /// but our own process list knows the whole thing.
     private func processLabel(_ c: Connection) -> String {
-        owners[c.pid]?.name ?? c.processName ?? "—"
+        owner(c.pid)?.name ?? "—"
+    }
+
+    /// The app's process list covers almost everything; anything newer than the
+    /// last sample is resolved from the kernel and cached (a pid's path can't
+    /// change, and the cache is dropped whenever the row set changes shape).
+    private func owner(_ pid: pid_t) -> ProcessOwner? {
+        if let o = owners[pid] { return o }
+        if let cached = resolvedOwners[pid] { return cached }
+        let o = ProcessOwner.forPID(pid)
+        resolvedOwners[pid] = o
+        return o
     }
 
     /// Show why there's nothing to show (e.g. the process isn't ours to read).
@@ -402,7 +414,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         if id == "process" {
             let cell = (table.makeView(withIdentifier: col.identifier, owner: self) as? NSTableCellView)
                 ?? ProcessListView.makeNameCell(identifier: col.identifier)
-            cell.imageView?.image = ProcessListView.icon(forExecPath: owners[c.pid]?.execPath ?? "")
+            cell.imageView?.image = ProcessListView.icon(forExecPath: owner(c.pid)?.execPath ?? "")
             cell.textField?.stringValue = text(id: id, row: c)
             return cell
         }

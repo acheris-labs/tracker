@@ -17,7 +17,6 @@ struct Connection: Hashable {
     var state: Int32            // TSI_S_*; -1 for UDP, which has no state
 
     /// Only netstat supplies these; nil from libproc.
-    var processName: String?
     var rxBytes: Double?
     var txBytes: Double?
 
@@ -37,11 +36,22 @@ struct Connection: Hashable {
 }
 
 /// What a pid belongs to, for the connections table's Process Name column:
-/// the full name (netstat truncates to 16 characters) and the executable path
-/// the icon is resolved from.
+/// the display name and the executable path its icon is resolved from.
 struct ProcessOwner: Equatable {
     var name: String
     var execPath: String
+
+    /// Resolve straight from the kernel. proc_pidpath works for every process,
+    /// including other users' — proc_name doesn't (it returns nothing for
+    /// root-owned daemons), and netstat's own column is truncated to 16
+    /// characters, so the path is the one reliable source.
+    static func forPID(_ pid: pid_t) -> ProcessOwner? {
+        var buf = [CChar](repeating: 0, count: 4096)
+        guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return nil }
+        let path = String(cString: buf)
+        guard !path.isEmpty else { return nil }
+        return ProcessOwner(name: (path as NSString).lastPathComponent, execPath: path)
+    }
 }
 
 enum ConnectionProto: String {
