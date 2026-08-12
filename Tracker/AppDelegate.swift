@@ -84,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderer.showBattery = Self.boolDefault("ShowBattery", default: false)
         renderer.showMemory = Self.boolDefault("ShowMemory", default: false)
         renderer.showDisk = Self.boolDefault("ShowDisk", default: false)
+        renderer.showNetwork = Self.boolDefault("ShowNetwork", default: false)
 
         NSLog("topology: P=\(cpu.numP) E=\(cpu.numE), dock=\(dockCapacity)s chart=\(chartCapacity)s")
         _ = cpu.sample()
@@ -134,7 +135,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chart?.window?.makeKeyAndOrderFront(nil)
         chart?.refresh(cpu: lastCPU, gpu: lastGPU, battery: lastBatteryInfo,
                        memory: lastMemory,
-                       diskRead: lastDiskRead, diskWrite: lastDiskWrite)
+                       diskRead: lastDiskRead, diskWrite: lastDiskWrite,
+                       netRx: network.totals.rxPerSec, netTx: network.totals.txPerSec)
         // Populate processes immediately rather than waiting up to a full
         // refresh interval. Reset the sampler if the window was closed so
         // CPU% / disk / power don't average over the time we were idle.
@@ -307,6 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showBattery: renderer.showBattery,
                 showMemory: renderer.showMemory,
                 showDisk: renderer.showDisk,
+                showNetwork: renderer.showNetwork,
                 drainThreshold: Self.intDefault("BadgeThresholdWatts", default: 20),
                 autoUpdate: updaterController.updater.automaticallyChecksForUpdates,
                 onDurationChange: { [weak self] s in self?.applyDockDuration(s) },
@@ -315,6 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onShowBatteryChange: { [weak self] b in self?.applyShowBattery(b) },
                 onShowMemoryChange: { [weak self] b in self?.applyShowMemory(b) },
                 onShowDiskChange: { [weak self] b in self?.applyShowDisk(b) },
+                onShowNetworkChange: { [weak self] b in self?.applyShowNetwork(b) },
                 onThresholdChange: { [weak self] v in self?.applyThreshold(v) },
                 onAutoUpdateChange: { [weak self] b in self?.applyAutoUpdate(b) }
             )
@@ -413,6 +417,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.applicationIconImage = renderer.render()
     }
 
+    private func applyShowNetwork(_ on: Bool) {
+        renderer.showNetwork = on
+        UserDefaults.standard.set(on, forKey: "ShowNetwork")
+        NSApp.applicationIconImage = renderer.render()
+    }
+
     private func applyColors(_ c: ChartColors) {
         renderer.colors = c
         c.save()
@@ -452,12 +462,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastMemory = m
         lastDiskRead = dr
         lastDiskWrite = dw
+        // Network history needs nettop samples even when the process view
+        // isn't open; only worth the (async, ~10 ms) cost when the lines are
+        // on. kick() drops overlapping requests itself.
+        if renderer.showNetwork { network.kick() }
+        let netTotals = network.totals
         renderer.append(cpu: f, gpu: g, battery: bi.percent, memory: m,
-                        diskRead: dr, diskWrite: dw)
+                        diskRead: dr, diskWrite: dw,
+                        netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec)
         NSApp.applicationIconImage = renderer.render()
         updateDockBadge(bi)
         chart?.refresh(cpu: f, gpu: g, battery: bi, memory: m,
-                       diskRead: dr, diskWrite: dw)
+                       diskRead: dr, diskWrite: dw,
+                       netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec)
 
         // Only pay the per-process sampling cost when someone is looking,
         // and only at the user-chosen interval (default 2s).

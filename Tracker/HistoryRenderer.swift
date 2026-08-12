@@ -7,6 +7,8 @@ struct HistoryFrame {
     let memory: Double       // 0..1
     let diskRead: Double     // bytes/sec
     let diskWrite: Double    // bytes/sec
+    let netRx: Double        // bytes/sec
+    let netTx: Double        // bytes/sec
 }
 
 struct ChartColors {
@@ -19,6 +21,8 @@ struct ChartColors {
     var memory: NSColor
     var diskRead: NSColor
     var diskWrite: NSColor
+    var netRx: NSColor
+    var netTx: NSColor
 
     static let `default` = ChartColors(
         pSys:      NSColor(srgbRed: 0.95, green: 0.20, blue: 0.20, alpha: 1),
@@ -29,7 +33,9 @@ struct ChartColors {
         battery:   NSColor(srgbRed: 1.00, green: 0.85, blue: 0.25, alpha: 1),
         memory:    NSColor(srgbRed: 0.92, green: 0.92, blue: 0.92, alpha: 1),
         diskRead:  NSColor(srgbRed: 0.20, green: 0.85, blue: 0.85, alpha: 1),
-        diskWrite: NSColor(srgbRed: 0.98, green: 0.45, blue: 0.75, alpha: 1)
+        diskWrite: NSColor(srgbRed: 0.98, green: 0.45, blue: 0.75, alpha: 1),
+        netRx:     NSColor(srgbRed: 0.25, green: 0.95, blue: 0.65, alpha: 1),
+        netTx:     NSColor(srgbRed: 1.00, green: 0.55, blue: 0.55, alpha: 1)
     )
 
     private static let keys = (
@@ -38,7 +44,8 @@ struct ChartColors {
         gpu: "Color.gpu",
         battery: "Color.battery",
         memory: "Color.memory",
-        diskRead: "Color.diskRead", diskWrite: "Color.diskWrite"
+        diskRead: "Color.diskRead", diskWrite: "Color.diskWrite",
+        netRx: "Color.netRx", netTx: "Color.netTx"
     )
 
     static func load() -> ChartColors {
@@ -53,7 +60,9 @@ struct ChartColors {
             battery:   d.string(forKey: keys.battery).flatMap(NSColor.fromHex) ?? def.battery,
             memory:    d.string(forKey: keys.memory).flatMap(NSColor.fromHex) ?? def.memory,
             diskRead:  d.string(forKey: keys.diskRead).flatMap(NSColor.fromHex) ?? def.diskRead,
-            diskWrite: d.string(forKey: keys.diskWrite).flatMap(NSColor.fromHex) ?? def.diskWrite
+            diskWrite: d.string(forKey: keys.diskWrite).flatMap(NSColor.fromHex) ?? def.diskWrite,
+            netRx:     d.string(forKey: keys.netRx).flatMap(NSColor.fromHex) ?? def.netRx,
+            netTx:     d.string(forKey: keys.netTx).flatMap(NSColor.fromHex) ?? def.netTx
         )
     }
 
@@ -68,6 +77,8 @@ struct ChartColors {
         d.set(memory.hexString,    forKey: ChartColors.keys.memory)
         d.set(diskRead.hexString,  forKey: ChartColors.keys.diskRead)
         d.set(diskWrite.hexString, forKey: ChartColors.keys.diskWrite)
+        d.set(netRx.hexString,     forKey: ChartColors.keys.netRx)
+        d.set(netTx.hexString,     forKey: ChartColors.keys.netTx)
     }
 }
 
@@ -138,6 +149,7 @@ final class HistoryRenderer {
     var showBattery: Bool = true
     var showMemory: Bool = true
     var showDisk: Bool = true
+    var showNetwork: Bool = true
 
     init(iconCapacity: Int, chartCapacity: Int, numP: Int, numE: Int,
          hasBattery: Bool, colors: ChartColors) {
@@ -148,7 +160,8 @@ final class HistoryRenderer {
         self.activeWindow = self.iconCapacity
         self.frames = Array(repeating: HistoryFrame(cpu: CPUFrame(), gpu: 0, battery: 0,
                                                     memory: 0,
-                                                    diskRead: 0, diskWrite: 0),
+                                                    diskRead: 0, diskWrite: 0,
+                                                    netRx: 0, netTx: 0),
                             count: Self.maxStorage)
         let total = max(1, numP + numE)
         self.pWeight = Double(numP) / Double(total)
@@ -164,10 +177,12 @@ final class HistoryRenderer {
     }
 
     func append(cpu: CPUFrame, gpu: Double, battery: Double, memory: Double,
-                diskRead: Double, diskWrite: Double) {
+                diskRead: Double, diskWrite: Double,
+                netRx: Double = 0, netTx: Double = 0) {
         frames[head] = HistoryFrame(cpu: cpu, gpu: gpu, battery: battery,
                                     memory: memory,
-                                    diskRead: diskRead, diskWrite: diskWrite)
+                                    diskRead: diskRead, diskWrite: diskWrite,
+                                    netRx: netRx, netTx: netTx)
         head = (head + 1) % Self.maxStorage
         if count < Self.maxStorage { count += 1 }
     }
@@ -194,6 +209,20 @@ final class HistoryRenderer {
             if f.diskWrite > maxIO { maxIO = f.diskWrite }
         }
         return maxIO
+    }
+
+    /// Visible-window max network throughput (bytes/sec), floor 128 KiB/s —
+    /// the network lines' independent auto-scale.
+    func netScaleMax() -> Double {
+        activeWindow = chartCapacity
+        let visible = visibleCount()
+        var maxNet: Double = 131_072
+        for i in 0..<visible {
+            let f = frames[visibleIndex(i)]
+            if f.netRx > maxNet { maxNet = f.netRx }
+            if f.netTx > maxNet { maxNet = f.netTx }
+        }
+        return maxNet
     }
 
     func render() -> NSImage {
@@ -272,6 +301,27 @@ final class HistoryRenderer {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
                          color: colors.memory, smoothed: smoothed) { $0.memory }
+            }
+            if showNetwork {
+                // Independent auto-scale across rx+tx, floor 128 KiB/s —
+                // deliberately NOT shared with disk: same units, but a disk
+                // burst would flatten the network lines (and vice versa).
+                var maxNet: Double = 131_072
+                for i in 0..<visible {
+                    let f = frames[visibleIndex(i)]
+                    if f.netRx > maxNet { maxNet = f.netRx }
+                    if f.netTx > maxNet { maxNet = f.netTx }
+                }
+                drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                         bandY: inner.minY, bandH: cpuH,
+                         color: colors.netRx, lineWidth: 1.25, smoothed: smoothed) {
+                    min(1.0, $0.netRx / maxNet)
+                }
+                drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                         bandY: inner.minY, bandH: cpuH,
+                         color: colors.netTx, lineWidth: 1.25, smoothed: smoothed) {
+                    min(1.0, $0.netTx / maxNet)
+                }
             }
             if showDisk {
                 // Independent auto-scale across read+write, floor 1 MiB/s.

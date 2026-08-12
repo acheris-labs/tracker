@@ -8,6 +8,7 @@ final class PreferencesWindowController: NSWindowController {
     private let onShowBatteryChange: (Bool) -> Void
     private let onShowMemoryChange: (Bool) -> Void
     private let onShowDiskChange: (Bool) -> Void
+    private let onShowNetworkChange: (Bool) -> Void
     private let onThresholdChange: (Int) -> Void
     private let onAutoUpdateChange: (Bool) -> Void
     private weak var thresholdLabel: NSTextField?
@@ -28,6 +29,7 @@ final class PreferencesWindowController: NSWindowController {
          showBattery: Bool,
          showMemory: Bool,
          showDisk: Bool,
+         showNetwork: Bool,
          drainThreshold: Int,
          autoUpdate: Bool,
          onDurationChange: @escaping (Int) -> Void,
@@ -36,6 +38,7 @@ final class PreferencesWindowController: NSWindowController {
          onShowBatteryChange: @escaping (Bool) -> Void,
          onShowMemoryChange: @escaping (Bool) -> Void,
          onShowDiskChange: @escaping (Bool) -> Void,
+         onShowNetworkChange: @escaping (Bool) -> Void,
          onThresholdChange: @escaping (Int) -> Void,
          onAutoUpdateChange: @escaping (Bool) -> Void) {
         self.durations = durations
@@ -46,6 +49,7 @@ final class PreferencesWindowController: NSWindowController {
         self.onShowBatteryChange = onShowBatteryChange
         self.onShowMemoryChange = onShowMemoryChange
         self.onShowDiskChange = onShowDiskChange
+        self.onShowNetworkChange = onShowNetworkChange
         self.onThresholdChange = onThresholdChange
         self.onAutoUpdateChange = onAutoUpdateChange
         self.initialThreshold = drainThreshold
@@ -61,6 +65,8 @@ final class PreferencesWindowController: NSWindowController {
         rows.append(("Memory",     \.memory))
         rows.append(("Disk read",  \.diskRead))
         rows.append(("Disk write", \.diskWrite))
+        rows.append(("Net received", \.netRx))
+        rows.append(("Net sent",     \.netTx))
         self.colorRows = rows
 
         let win = NSWindow(
@@ -111,7 +117,11 @@ final class PreferencesWindowController: NSWindowController {
         let diskCheck = NSButton(checkboxWithTitle: "Show Disk I/O",
                                  target: self, action: #selector(toggleShowDisk(_:)))
         diskCheck.state = showDisk ? .on : .off
+        let netCheck = NSButton(checkboxWithTitle: "Show Network",
+                                target: self, action: #selector(toggleShowNetwork(_:)))
+        netCheck.state = showNetwork ? .on : .off
         grid.addRow(with: [Self.label(""), diskCheck])
+        grid.addRow(with: [Self.label(""), netCheck])
 
         let autoUpdateCheck = NSButton(checkboxWithTitle: "Check for updates automatically",
                                        target: self, action: #selector(toggleAutoUpdate(_:)))
@@ -230,6 +240,10 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func toggleShowMemory(_ sender: NSButton) {
         onShowMemoryChange(sender.state == .on)
+    }
+
+    @objc private func toggleShowNetwork(_ sender: NSButton) {
+        onShowNetworkChange(sender.state == .on)
     }
 
     @objc private func toggleShowDisk(_ sender: NSButton) {

@@ -124,6 +124,9 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     private var timeChip: LegendChip?
     private var readChip: LegendChip!
     private var writeChip: LegendChip!
+    private var netRxChip: LegendChip!
+    private var netTxChip: LegendChip!
+    private var netScaleChip: LegendChip!
 
     private static let bytesFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -188,10 +191,12 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     required init?(coder: NSCoder) { fatalError("not implemented") }
 
     func refresh(cpu: CPUFrame, gpu: Double, battery: BatteryInfo,
-                 memory: Double, diskRead: Double, diskWrite: Double) {
+                 memory: Double, diskRead: Double, diskWrite: Double,
+                 netRx: Double = 0, netTx: Double = 0) {
         chartView.needsDisplay = true
         updateChips(cpu: cpu, gpu: gpu, battery: battery,
-                    memory: memory, diskRead: diskRead, diskWrite: diskWrite)
+                    memory: memory, diskRead: diskRead, diskWrite: diskWrite,
+                    netRx: netRx, netTx: netTx)
         updateRightAxis()
         applyCurrentColors()
     }
@@ -240,6 +245,11 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         }
         readChip   = LegendChip(name: "Read",  color: c0)
         writeChip  = LegendChip(name: "Write", color: c0)
+        netRxChip  = LegendChip(name: "Rcvd",  color: c0)
+        netTxChip  = LegendChip(name: "Sent",  color: c0)
+        // Scale has no line of its own — it reports the network lines' current
+        // auto-scale so their height is readable next to the disk axis.
+        netScaleChip = LegendChip(name: "Scale", color: .clear)
 
         let cpuCol  = Self.legendColumn(title: "Processor",
                                         chips: [pSysChip, eSysChip, pUserChip, eUserChip])
@@ -249,9 +259,11 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         if let t = timeChip    { sysChips.append(t) }
         let sysCol  = Self.legendColumn(title: "System", chips: sysChips)
         let diskCol = Self.legendColumn(title: "Storage", chips: [readChip, writeChip])
+        let netCol = Self.legendColumn(title: "Network",
+                                       chips: [netRxChip, netTxChip, netScaleChip])
 
         // Centered boxed panes, same rhythm as the process tabs' footers.
-        let infoStrip = NSStackView(views: [cpuCol, sysCol, diskCol])
+        let infoStrip = NSStackView(views: [cpuCol, sysCol, diskCol, netCol])
         infoStrip.orientation = .horizontal
         infoStrip.alignment = .top
         infoStrip.spacing = 12
@@ -658,19 +670,27 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         batteryChip?.setColor(c.battery)
         readChip.setColor(c.diskRead)
         writeChip.setColor(c.diskWrite)
+        netRxChip.setColor(c.netRx)
+        netTxChip.setColor(c.netTx)
     }
 
     private func updateRightAxis() {
         guard let r = renderer else { return }
-        let max = r.diskScaleMax()
+        // The axis labels one bytes/sec family: disk when shown, else the
+        // network lines (each family auto-scales independently — see
+        // HistoryRenderer.draw for why they don't share a scale).
+        let max = r.showDisk || !r.showNetwork ? r.diskScaleMax() : r.netScaleMax()
         let mid = max / 2
         rightLabels[0].stringValue = "\(Self.bytesFormatter.string(fromByteCount: Int64(max)))/s"
         rightLabels[1].stringValue = "\(Self.bytesFormatter.string(fromByteCount: Int64(mid)))/s"
         rightLabels[2].stringValue = "0"
+        netScaleChip.setValue(
+            "≤ \(Self.bytesFormatter.string(fromByteCount: Int64(r.netScaleMax())))/s")
     }
 
     private func updateChips(cpu: CPUFrame, gpu: Double, battery: BatteryInfo,
-                             memory: Double, diskRead: Double, diskWrite: Double) {
+                             memory: Double, diskRead: Double, diskWrite: Double,
+                             netRx: Double, netTx: Double) {
         pSysChip.setValue(pct(cpu.pSys))
         eSysChip.setValue(pct(cpu.eSys))
         pUserChip.setValue(pct(cpu.pUser))
@@ -682,6 +702,8 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         timeChip?.setValue(formatBatteryTime(battery))
         readChip.setValue("\(Self.bytesFormatter.string(fromByteCount: Int64(diskRead)))/s")
         writeChip.setValue("\(Self.bytesFormatter.string(fromByteCount: Int64(diskWrite)))/s")
+        netRxChip.setValue("\(Self.bytesFormatter.string(fromByteCount: Int64(netRx)))/s")
+        netTxChip.setValue("\(Self.bytesFormatter.string(fromByteCount: Int64(netTx)))/s")
     }
 
     private func formatPower(watts w: Double, onAC: Bool) -> String {
