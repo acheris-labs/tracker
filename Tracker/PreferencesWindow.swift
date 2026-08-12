@@ -64,7 +64,7 @@ final class PreferencesWindowController: NSWindowController {
         grid.columnSpacing = 10
 
         // Trace table: one row per trace — label · color well(s) · where it
-        // shows (Dock / Chart). The CPU stack is always drawn on both.
+        // shows (Dock / Chart).
         buildTraceTable(grid: grid, hasBattery: hasBattery)
 
         // Drain alert threshold (W) — slider + value label.
@@ -144,6 +144,7 @@ final class PreferencesWindowController: NSWindowController {
     private func makeWell(colorIndex i: Int) -> NSColorWell {
         let well = NSColorWell()
         well.color = colors[keyPath: colorRows[i].keyPath]
+        well.toolTip = colorRows[i].label
         well.tag = i
         well.target = self
         well.action = #selector(colorChanged(_:))
@@ -173,8 +174,7 @@ final class PreferencesWindowController: NSWindowController {
 
     /// Rows: trace · its color well(s) · Dock checkbox · Chart checkbox.
     /// colorWells must be appended in colorRows order, so wells are created
-    /// in that same order here (CPU's four, GPU, battery?, memory, disk ×2,
-    /// network ×2).
+    /// in that same order here.
     private func buildTraceTable(grid: NSGridView, hasBattery: Bool) {
         grid.addRow(with: [Self.label(""), Self.columnHeader("Color"),
                            Self.columnHeader("Dock"), Self.columnHeader("Chart")])
@@ -185,24 +185,11 @@ final class PreferencesWindowController: NSWindowController {
             stack.spacing = 4
             return stack
         }
-        func alwaysOn() -> NSButton {
-            let c = NSButton(checkboxWithTitle: "", target: nil, action: nil)
-            c.state = .on
-            c.isEnabled = false
-            c.toolTip = "The CPU stack is always shown"
-            return c
-        }
-
         // Index into colorRows by label lookup so battery's presence can't
         // silently shift positions.
         func idx(_ label: String) -> Int {
             colorRows.firstIndex { $0.label == label }!
         }
-
-        grid.addRow(with: [Self.label("CPU:"),
-                           wellStack([idx("P-core system"), idx("E-core system"),
-                                      idx("P-core user"), idx("E-core user")]),
-                           alwaysOn(), alwaysOn()])
 
         func traceRow(_ title: String, _ trace: ChartTrace, wells: [Int]) {
             grid.addRow(with: [Self.label(title),
@@ -210,6 +197,8 @@ final class PreferencesWindowController: NSWindowController {
                                makeSurfaceCheck(trace, surface: .dock, traces: iconTraces),
                                makeSurfaceCheck(trace, surface: .chart, traces: chartTraces)])
         }
+        traceRow("CPU:", .cpu, wells: [idx("P-core system"), idx("E-core system"),
+                                       idx("P-core user"), idx("E-core user")])
         traceRow("GPU:", .gpu, wells: [idx("GPU")])
         if hasBattery { traceRow("Battery:", .battery, wells: [idx("Battery")]) }
         traceRow("Memory:", .memory, wells: [idx("Memory")])

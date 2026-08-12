@@ -82,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    colors: ChartColors.load())
         renderer.iconTraces = Self.loadTraces(key: "DockTraces")
         renderer.chartTraces = Self.loadTraces(key: "ChartTraces")
+        UserDefaults.standard.set(true, forKey: "MigratedCPUTrace")
 
         NSLog("topology: P=\(cpu.numP) E=\(cpu.numE), dock=\(dockCapacity)s chart=\(chartCapacity)s")
         _ = cpu.sample()
@@ -401,9 +402,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// time (both surfaces inherit the old single configuration).
     private static func loadTraces(key: String) -> Set<ChartTrace> {
         if let arr = UserDefaults.standard.stringArray(forKey: key) {
-            return Set(arr.compactMap(ChartTrace.init(rawValue:)))
+            var t = Set(arr.compactMap(ChartTrace.init(rawValue:)))
+            // Arrays persisted before CPU became selectable imply it was on;
+            // write the migrated array back so the next launch doesn't
+            // mistake it for a deliberate CPU-off choice.
+            if !arr.contains("cpu"), !UserDefaults.standard.bool(forKey: "MigratedCPUTrace") {
+                t.insert(.cpu)
+                UserDefaults.standard.set(t.map(\.rawValue).sorted(), forKey: key)
+            }
+            return t
         }
-        var t: Set<ChartTrace> = []
+        var t: Set<ChartTrace> = [.cpu]
         if boolDefault("ShowGPU", default: true) { t.insert(.gpu) }
         if boolDefault("ShowBattery", default: false) { t.insert(.battery) }
         if boolDefault("ShowMemory", default: false) { t.insert(.memory) }

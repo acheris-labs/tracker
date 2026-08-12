@@ -112,11 +112,12 @@ extension NSColor {
     }
 }
 
-/// The optional overlay traces; the CPU stack is always drawn.
+/// The selectable traces, CPU stack included.
 enum ChartTrace: String, CaseIterable {
-    case gpu, battery, memory, disk, network
+    case cpu, gpu, battery, memory, disk, network
     var label: String {
         switch self {
+        case .cpu: return "CPU"
         case .gpu: return "GPU"
         case .battery: return "Battery"
         case .memory: return "Memory"
@@ -164,8 +165,8 @@ final class HistoryRenderer {
     var colors: ChartColors
     // Independent per-surface trace sets: the dock icon usually wants the
     // short "right now" essentials, the chart the full picture.
-    var iconTraces: Set<ChartTrace> = [.gpu]
-    var chartTraces: Set<ChartTrace> = [.gpu]
+    var iconTraces: Set<ChartTrace> = [.cpu, .gpu]
+    var chartTraces: Set<ChartTrace> = [.cpu, .gpu]
 
     init(iconCapacity: Int, chartCapacity: Int, numP: Int, numE: Int,
          hasBattery: Bool, colors: ChartColors) {
@@ -366,11 +367,11 @@ final class HistoryRenderer {
                      glowDepth: Self.gpuGlowDepth) { $0.gpu }
         }
 
-        if smoothed {
+        if traces.contains(.cpu), smoothed {
             drawCPUArea(visible: visible, xOffset: xOffset, colW: colW,
                         baseY: inner.minY, cpuH: cpuH,
                         colors: [pSysColor, eSysColor, pUsrColor, eUsrColor])
-        } else {
+        } else if traces.contains(.cpu) {
             for i in 0..<visible {
                 let f = frames[visibleIndex(i)]
                 let x = inner.minX + xOffset + CGFloat(i) * colW
