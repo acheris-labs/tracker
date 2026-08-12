@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return f
     }()
 
-    private let durations: [(label: String, seconds: Int)] = [
+    static let durations: [(label: String, seconds: Int)] = [
         ("15 seconds", 15),
         ("30 seconds", 30),
         ("1 minute",   60),
@@ -228,7 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.autoenablesItems = false
-        for d in durations {
+        for d in Self.durations {
             let item = NSMenuItem(title: d.label,
                                   action: #selector(setDurationFromMenu(_:)),
                                   keyEquivalent: "")
@@ -277,14 +277,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func setDurationFromMenu(_ sender: NSMenuItem) {
+    @objc func setDurationFromMenu(_ sender: NSMenuItem) {
         applyDuration(sender.tag)
     }
 
     @objc func showPreferences(_ sender: Any?) {
         if prefs == nil {
             prefs = PreferencesWindowController(
-                durations: durations,
+                durations: Self.durations,
                 currentDuration: renderer.capacity,
                 colors: renderer.colors,
                 hasBattery: battery.hasBattery,

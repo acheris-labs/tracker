@@ -87,6 +87,28 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         var netTxPerSec = 0.0
     }
 
+    /// AM's View-menu scopes, driven from the toolbar's "…" menu.
+    enum Scope: Int, CaseIterable {
+        case all, my, system
+        var label: String {
+            switch self {
+            case .all: return "All Processes"
+            case .my: return "My Processes"
+            case .system: return "System Processes"
+            }
+        }
+    }
+    private static let scopeKey = "ProcessScope"
+    private let currentUser = NSUserName()
+    private(set) var scope: Scope =
+        Scope(rawValue: UserDefaults.standard.integer(forKey: "ProcessScope")) ?? .all
+
+    func applyScope(_ s: Scope) {
+        scope = s
+        UserDefaults.standard.set(s.rawValue, forKey: Self.scopeKey)
+        applyFilterAndSort()
+    }
+
     private var currentTab: Tab = .cpu
     private var systemStats = SystemStats()
 
@@ -148,12 +170,18 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         // Capture the selection (by pid) before `rows` is replaced.
         let keepPID: pid_t? = selectedRowIndex().map { rows[$0].pid }
 
+        let scoped: [ProcessSnapshot]
+        switch scope {
+        case .all:    scoped = allRows
+        case .my:     scoped = allRows.filter { $0.user == currentUser }
+        case .system: scoped = allRows.filter { $0.user != currentUser }
+        }
         let filtered: [ProcessSnapshot]
         if searchText.isEmpty {
-            filtered = allRows
+            filtered = scoped
         } else {
             let q = searchText.lowercased()
-            filtered = allRows.filter {
+            filtered = scoped.filter {
                 $0.name.lowercased().contains(q) || "\($0.pid)".contains(q)
             }
         }

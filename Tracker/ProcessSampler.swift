@@ -121,7 +121,12 @@ final class ProcessSampler {
             proc_pidinfo(pid, PROC_PIDTASKINFO, 0, ptr,
                          Int32(MemoryLayout<proc_taskinfo>.size))
         }
-        guard ti == Int32(MemoryLayout<proc_taskinfo>.size) else { return nil }
+        // Other users' processes can't be stat'ed without entitlements, but
+        // they still exist — list them with identity only (blank stats) so
+        // the All / System scopes aren't silently just "my processes".
+        guard ti == Int32(MemoryLayout<proc_taskinfo>.size) else {
+            return minimalSnapshot(pid: pid)
+        }
 
         let totalNanos = machTicksToNanos(taskInfo.pti_total_user + taskInfo.pti_total_system)
 
@@ -262,6 +267,29 @@ final class ProcessSampler {
         }
         if n > 0 { return String(cString: buf) }
         return "pid \(pid)"
+    }
+
+    /// Identity-only row for a process whose stats we can't read (other
+    /// users' processes): name + uid from sysctl, everything else zero.
+    private func minimalSnapshot(pid: Int32) -> ProcessSnapshot? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let name = withUnsafeBytes(of: info.kp_proc.p_comm) { raw in
+            String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+        }
+        guard !name.isEmpty else { return nil }
+        return ProcessSnapshot(pid: pid, name: name,
+                               user: username(uid: info.kp_eproc.e_ucred.cr_uid),
+                               cpuPercent: 0, rssMB: 0, vsizeMB: 0,
+                               threads: 0,
+                               diskReadBytesPerSec: 0, diskWriteBytesPerSec: 0,
+                               diskReadTotal: 0, diskWriteTotal: 0,
+                               powerWatts: 0, energyJoules: 0,
+                               cpuTimeSeconds: 0, idleWakeups: 0,
+                               isTranslated: false, execPath: "",
+                               ppid: Int32(info.kp_eproc.e_ppid))
     }
 
     private func username(uid: uid_t) -> String {

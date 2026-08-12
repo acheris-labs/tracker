@@ -488,6 +488,40 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         freq.submenu = freqMenu
         menu.addItem(freq)
 
+        // Scope, like AM's View menu.
+        let view = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
+        let viewMenu = NSMenu()
+        viewMenu.autoenablesItems = false
+        for scope in ProcessListView.Scope.allCases {
+            let mi = NSMenuItem(title: scope.label, action: #selector(scopeChosen(_:)),
+                                keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = scope.rawValue
+            mi.state = (scope == processList.scope) ? .on : .off
+            mi.isEnabled = onProcess
+            viewMenu.addItem(mi)
+        }
+        view.submenu = viewMenu
+        view.isEnabled = onProcess
+        menu.addItem(view)
+
+        // Chart history window — meaningful on every tab (drives the dock
+        // icon too), handled by the app delegate via the responder chain.
+        let hist = NSMenuItem(title: "Chart History", action: nil, keyEquivalent: "")
+        let histMenu = NSMenu()
+        histMenu.autoenablesItems = false
+        let current = renderer?.capacity ?? 0
+        for d in AppDelegate.durations {
+            let mi = NSMenuItem(title: d.label,
+                                action: #selector(AppDelegate.setDurationFromMenu(_:)),
+                                keyEquivalent: "")
+            mi.tag = d.seconds
+            mi.state = (d.seconds == current) ? .on : .off
+            histMenu.addItem(mi)   // nil target → responder chain → app delegate
+        }
+        hist.submenu = histMenu
+        menu.addItem(hist)
+
         let cols = NSMenuItem(title: "Columns", action: nil, keyEquivalent: "")
         cols.submenu = processList.columnSelectorMenu()
         cols.isEnabled = onProcess
@@ -506,6 +540,13 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     @objc private func intervalChosen(_ sender: NSMenuItem) {
         guard let s = sender.representedObject as? Int else { return }
         processList.applyInterval(s)
+    }
+
+    @objc private func scopeChosen(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? Int,
+              let scope = ProcessListView.Scope(rawValue: raw) else { return }
+        processList.applyScope(scope)
+        if selector.selectedSegment > 0 { window?.subtitle = scope.label }
     }
 
     // Menu-driven selection (⌘1 / ⌘2 from the app's Window menu).
@@ -528,7 +569,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             tabs.selectTabViewItem(at: 0)
         }
         // AM-style subtitle under the window title on the process tabs.
-        window?.subtitle = onProcess ? "All Processes" : ""
+        window?.subtitle = onProcess ? processList.scope.label : ""
         // Process-only toolbar items hide on the Chart tab (macOS 15+;
         // merely disabled on 14, where NSToolbarItem.isHidden doesn't exist).
         quitItem?.isEnabled = onProcess
