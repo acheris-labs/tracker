@@ -197,32 +197,40 @@ final class HistoryRenderer {
         return (head - visible + i + Self.maxStorage * 2) % Self.maxStorage
     }
 
-    /// Visible-window max disk throughput in bytes/sec — what the chart's
-    /// right-axis auto-scale is currently mapped to. Floor 1 MiB/s.
-    func diskScaleMax() -> Double {
-        activeWindow = chartCapacity   // only the chart's right axis uses this
-        let visible = visibleCount()
-        var maxIO: Double = 1_048_576
-        for i in 0..<visible {
-            let f = frames[visibleIndex(i)]
-            if f.diskRead > maxIO  { maxIO = f.diskRead }
-            if f.diskWrite > maxIO { maxIO = f.diskWrite }
-        }
-        return maxIO
+    /// Bottom of the shared logarithmic bytes/sec scale — rates at or below
+    /// this sit on the baseline.
+    static let byteScaleMinRate: Double = 1024
+
+    /// Top of the shared logarithmic bytes/sec scale: the visible-window max
+    /// across every shown bytes/sec series (disk r/w, network rx/tx), floor
+    /// 1 MiB/s. Log lets wildly different families share one honest axis.
+    func byteScaleMax() -> Double {
+        activeWindow = chartCapacity   // the chart's right axis uses this
+        return byteScaleMax(visible: visibleCount())
     }
 
-    /// Visible-window max network throughput (bytes/sec), floor 128 KiB/s —
-    /// the network lines' independent auto-scale.
-    func netScaleMax() -> Double {
-        activeWindow = chartCapacity
-        let visible = visibleCount()
-        var maxNet: Double = 131_072
+    private func byteScaleMax(visible: Int) -> Double {
+        var maxRate: Double = 1_048_576
         for i in 0..<visible {
             let f = frames[visibleIndex(i)]
-            if f.netRx > maxNet { maxNet = f.netRx }
-            if f.netTx > maxNet { maxNet = f.netTx }
+            if showDisk {
+                if f.diskRead > maxRate  { maxRate = f.diskRead }
+                if f.diskWrite > maxRate { maxRate = f.diskWrite }
+            }
+            if showNetwork {
+                if f.netRx > maxRate { maxRate = f.netRx }
+                if f.netTx > maxRate { maxRate = f.netTx }
+            }
         }
-        return maxNet
+        return maxRate
+    }
+
+    /// 0…1 position of a rate on the shared log scale.
+    private static func logNorm(_ v: Double, maxRate: Double) -> Double {
+        guard v > byteScaleMinRate else { return 0 }
+        let denom = log(maxRate / byteScaleMinRate)
+        guard denom > 0 else { return 0 }
+        return min(1.0, log(v / byteScaleMinRate) / denom)
     }
 
     func render() -> NSImage {
@@ -302,44 +310,34 @@ final class HistoryRenderer {
                          bandY: inner.minY, bandH: cpuH,
                          color: colors.memory, smoothed: smoothed) { $0.memory }
             }
-            if showNetwork {
-                // Independent auto-scale across rx+tx, floor 128 KiB/s —
-                // deliberately NOT shared with disk: same units, but a disk
-                // burst would flatten the network lines (and vice versa).
-                var maxNet: Double = 131_072
-                for i in 0..<visible {
-                    let f = frames[visibleIndex(i)]
-                    if f.netRx > maxNet { maxNet = f.netRx }
-                    if f.netTx > maxNet { maxNet = f.netTx }
+            // Disk and network share one LOGARITHMIC bytes/sec scale: linear
+            // sharing would let either family's burst flatten the other, and
+            // separate scales made same-unit lines incomparable.
+            if showDisk || showNetwork {
+                let maxRate = byteScaleMax(visible: visible)
+                if showNetwork {
+                    drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                             bandY: inner.minY, bandH: cpuH,
+                             color: colors.netRx, lineWidth: 1.25, smoothed: smoothed) {
+                        Self.logNorm($0.netRx, maxRate: maxRate)
+                    }
+                    drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                             bandY: inner.minY, bandH: cpuH,
+                             color: colors.netTx, lineWidth: 1.25, smoothed: smoothed) {
+                        Self.logNorm($0.netTx, maxRate: maxRate)
+                    }
                 }
-                drawLine(visible: visible, xOffset: xOffset, colW: colW,
-                         bandY: inner.minY, bandH: cpuH,
-                         color: colors.netRx, lineWidth: 1.25, smoothed: smoothed) {
-                    min(1.0, $0.netRx / maxNet)
-                }
-                drawLine(visible: visible, xOffset: xOffset, colW: colW,
-                         bandY: inner.minY, bandH: cpuH,
-                         color: colors.netTx, lineWidth: 1.25, smoothed: smoothed) {
-                    min(1.0, $0.netTx / maxNet)
-                }
-            }
-            if showDisk {
-                // Independent auto-scale across read+write, floor 1 MiB/s.
-                var maxIO: Double = 1_048_576
-                for i in 0..<visible {
-                    let f = frames[visibleIndex(i)]
-                    if f.diskRead > maxIO  { maxIO = f.diskRead }
-                    if f.diskWrite > maxIO { maxIO = f.diskWrite }
-                }
-                drawLine(visible: visible, xOffset: xOffset, colW: colW,
-                         bandY: inner.minY, bandH: cpuH,
-                         color: colors.diskRead, lineWidth: 1.25, smoothed: smoothed) {
-                    min(1.0, $0.diskRead / maxIO)
-                }
-                drawLine(visible: visible, xOffset: xOffset, colW: colW,
-                         bandY: inner.minY, bandH: cpuH,
-                         color: colors.diskWrite, lineWidth: 1.25, smoothed: smoothed) {
-                    min(1.0, $0.diskWrite / maxIO)
+                if showDisk {
+                    drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                             bandY: inner.minY, bandH: cpuH,
+                             color: colors.diskRead, lineWidth: 1.25, smoothed: smoothed) {
+                        Self.logNorm($0.diskRead, maxRate: maxRate)
+                    }
+                    drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                             bandY: inner.minY, bandH: cpuH,
+                             color: colors.diskWrite, lineWidth: 1.25, smoothed: smoothed) {
+                        Self.logNorm($0.diskWrite, maxRate: maxRate)
+                    }
                 }
             }
         }

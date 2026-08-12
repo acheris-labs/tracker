@@ -126,7 +126,6 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     private var writeChip: LegendChip!
     private var netRxChip: LegendChip!
     private var netTxChip: LegendChip!
-    private var netScaleChip: LegendChip!
 
     private static let bytesFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -247,9 +246,6 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         writeChip  = LegendChip(name: "Write", color: c0)
         netRxChip  = LegendChip(name: "Rcvd",  color: c0)
         netTxChip  = LegendChip(name: "Sent",  color: c0)
-        // Scale has no line of its own — it reports the network lines' current
-        // auto-scale so their height is readable next to the disk axis.
-        netScaleChip = LegendChip(name: "Scale", color: .clear)
 
         let cpuCol  = Self.legendColumn(title: "Processor",
                                         chips: [pSysChip, eSysChip, pUserChip, eUserChip])
@@ -260,7 +256,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         let sysCol  = Self.legendColumn(title: "System", chips: sysChips)
         let diskCol = Self.legendColumn(title: "Storage", chips: [readChip, writeChip])
         let netCol = Self.legendColumn(title: "Network",
-                                       chips: [netRxChip, netTxChip, netScaleChip])
+                                       chips: [netRxChip, netTxChip])
 
         // Centered boxed panes, same rhythm as the process tabs' footers.
         let infoStrip = NSStackView(views: [cpuCol, sysCol, diskCol, netCol])
@@ -676,16 +672,14 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
     private func updateRightAxis() {
         guard let r = renderer else { return }
-        // The axis labels one bytes/sec family: disk when shown, else the
-        // network lines (each family auto-scales independently — see
-        // HistoryRenderer.draw for why they don't share a scale).
-        let max = r.showDisk || !r.showNetwork ? r.diskScaleMax() : r.netScaleMax()
-        let mid = max / 2
+        // Shared LOG bytes/sec axis for disk + network. The mid label is the
+        // value at half height — the geometric mean of the scale's ends —
+        // which is also what tells the reader the axis is logarithmic.
+        let max = r.byteScaleMax()
+        let mid = (HistoryRenderer.byteScaleMinRate * max).squareRoot()
         rightLabels[0].stringValue = "\(Self.bytesFormatter.string(fromByteCount: Int64(max)))/s"
         rightLabels[1].stringValue = "\(Self.bytesFormatter.string(fromByteCount: Int64(mid)))/s"
         rightLabels[2].stringValue = "0"
-        netScaleChip.setValue(
-            "≤ \(Self.bytesFormatter.string(fromByteCount: Int64(r.netScaleMax())))/s")
     }
 
     private func updateChips(cpu: CPUFrame, gpu: Double, battery: BatteryInfo,
