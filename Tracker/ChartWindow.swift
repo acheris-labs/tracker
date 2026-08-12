@@ -376,7 +376,9 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         var isProcess: Bool { if case .process = self { return true }; return false }
         /// Search filters both lists; Quit/Inspect act on a selected process.
         var hasSearch: Bool { self != .chart }
-        var hasProcessActions: Bool { isProcess }
+        /// Quit / Inspect need a process to act on: a process row, or the
+        /// process owning a selected connection.
+        var hasProcessActions: Bool { self != .chart }
     }
 
     /// Last segment; kept in one place so the index arithmetic has a name.
@@ -663,6 +665,10 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         connectionList.onInspect = { [weak self] pid in
             self?.processList.openInspector(pid: pid)
         }
+        connectionList.onQuit = { [weak self] pid in self?.processList.quit(pid: pid) }
+        connectionList.onForceQuit = { [weak self] pid in
+            self?.processList.forceQuit(pid: pid)
+        }
         let connTab = NSTabViewItem(identifier: "connections")
         connTab.view = connectionList
 
@@ -713,13 +719,13 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             item.image = NSImage(systemSymbolName: "xmark.circle",
                                  accessibilityDescription: "Quit selected process")
             item.label = "Quit"
-            item.toolTip = "Quit the selected process"
+            item.toolTip = "Quit the selected process"   // or the connection's owner
             item.isBordered = true
             item.autovalidates = false
             item.isEnabled = onProcess
             if #available(macOS 15.0, *) { item.isHidden = !onProcess }
-            item.target = processList
-            item.action = #selector(ProcessListView.quitSelected)
+            item.target = self
+            item.action = #selector(quitFromToolbar(_:))
             quitItem = item
             return item
         case .inspect:
@@ -732,8 +738,8 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             item.autovalidates = false
             item.isEnabled = onProcess
             if #available(macOS 15.0, *) { item.isHidden = !onProcess }
-            item.target = processList
-            item.action = #selector(ProcessListView.inspectSelected)
+            item.target = self
+            item.action = #selector(inspectFromToolbar(_:))
             inspectItem = item
             return item
         case .actions:
@@ -784,6 +790,42 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         case .actions:     actionsItem = item as? NSMenuToolbarItem
         default: break
         }
+    }
+
+    /// Toolbar Quit / Inspect: same buttons, whichever list is showing.
+    @objc private func quitFromToolbar(_ sender: Any?) {
+        switch pane {
+        case .connections:
+            guard let pid = connectionList.selectedPID else { NSSound.beep(); return }
+            processList.quit(pid: pid)
+        default:
+            processList.quitSelected()
+        }
+    }
+
+    @objc private func inspectFromToolbar(_ sender: Any?) {
+        switch pane {
+        case .connections:
+            guard let pid = connectionList.selectedPID else { NSSound.beep(); return }
+            processList.openInspector(pid: pid)
+        default:
+            processList.inspectSelected()
+        }
+    }
+
+    @objc private func forceQuitFromMenu(_ sender: Any?) {
+        switch pane {
+        case .connections:
+            guard let pid = connectionList.selectedPID else { NSSound.beep(); return }
+            processList.forceQuit(pid: pid)
+        default:
+            processList.forceQuitSelected()
+        }
+    }
+
+    @objc private func toggleHostNameResolution(_ sender: NSMenuItem) {
+        ConnectionListView.resolvesHostNames.toggle()
+        connectionList.hostNameDisplayChanged()
     }
 
     @objc private func searchChanged(_ sender: NSSearchField) {
@@ -855,6 +897,15 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         hist.submenu = histMenu
         menu.addItem(hist)
 
+        if pane == .connections {
+            let resolve = NSMenuItem(title: "Resolve Host Names",
+                                     action: #selector(toggleHostNameResolution(_:)),
+                                     keyEquivalent: "")
+            resolve.target = self
+            resolve.state = ConnectionListView.resolvesHostNames ? .on : .off
+            menu.addItem(resolve)
+        }
+
         let cols = NSMenuItem(title: "Columns", action: nil, keyEquivalent: "")
         cols.submenu = pane == .connections
             ? connectionList.columnSelectorMenu()
@@ -865,10 +916,10 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         // Destructive action last.
         menu.addItem(.separator())
         let force = NSMenuItem(title: "Force Quit Process…",
-                               action: #selector(ProcessListView.forceQuitSelected),
+                               action: #selector(forceQuitFromMenu(_:)),
                                keyEquivalent: "")
-        force.target = processList
-        force.isEnabled = onProcess
+        force.target = self
+        force.isEnabled = pane.hasProcessActions
         menu.addItem(force)
     }
 

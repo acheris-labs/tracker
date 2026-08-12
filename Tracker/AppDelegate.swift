@@ -541,7 +541,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 chart?.processList.setSnapshots(snaps)
                 lastProcessNames = Dictionary(
-                    snaps.map { ($0.pid, ProcessOwner(name: $0.name, execPath: $0.execPath)) },
+                    snaps.map { ($0.pid, ProcessOwner(name: $0.name, execPath: $0.execPath,
+                                                      user: $0.user)) },
                     uniquingKeysWith: { a, _ in a })
                 pushConnections()
                 processTickCount = 0

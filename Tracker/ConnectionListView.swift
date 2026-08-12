@@ -11,7 +11,7 @@ import AppKit
 /// flag and the defaults namespace differ.
 final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private enum SortKey: String {
-        case process, pid, proto, laddr, lport, rhost, rport, state, rcvd, sent
+        case process, pid, user, proto, laddr, lport, rhost, rport, state, rcvd, sent
     }
 
     private let table = NSTableView()
@@ -52,6 +52,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         // frame-based (like the sibling panes) and its scroll view autoresizes.
         buildTable()
         buildLayout()
+        buildRowMenu()
         applySavedColumns()
         table.sortDescriptors = [NSSortDescriptor(key: sortKey.rawValue,
                                                   ascending: sortAscending)]
@@ -96,9 +97,12 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
 
     private func applyFilterAndSort() {
         let matches = filter.isEmpty ? all : all.filter { c in
-            let fields = [processLabel(c), "\(c.pid)", c.proto.label, c.localAddr,
+            let fields = [processLabel(c), "\(c.pid)", owner(c.pid)?.user ?? "",
+                          c.proto.label, c.localAddr,
                           "\(c.localPort)", remoteHost(c), c.remoteAddr,
                           "\(c.remotePort)", ConnectionSampler.stateLabel(c.state)]
+            // c.remoteAddr is already in the list above, so typing an IP finds
+            // the row whether or not its name is being shown.
             return fields.contains { $0.localizedCaseInsensitiveContains(filter) }
         }
         rows = sorted(matches)
@@ -144,6 +148,35 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     /// Double-click hands the row's pid back, so the window can open the same
     /// inspector the process tabs do.
     var onInspect: ((pid_t) -> Void)?
+    /// Quit / Force Quit the process owning the selected connection. Killing an
+    /// individual connection isn't possible without root or a network
+    /// extension, so the process is the unit of action here.
+    var onQuit: ((pid_t) -> Void)?
+    var onForceQuit: ((pid_t) -> Void)?
+
+    /// pid of the selected row, or of the right-clicked one when a menu is up.
+    var selectedPID: pid_t? {
+        let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
+        guard row >= 0, row < rows.count else { return nil }
+        return rows[row].pid
+    }
+
+    @objc private func inspectFromMenu() { selectedPID.map { onInspect?($0) } }
+    @objc private func quitFromMenu()    { selectedPID.map { onQuit?($0) } }
+    @objc private func forceQuitFromMenu() { selectedPID.map { onForceQuit?($0) } }
+
+    private func buildRowMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for (title, action) in [("Inspect Process", #selector(inspectFromMenu)),
+                                ("Quit Process", #selector(quitFromMenu)),
+                                ("Force Quit Process…", #selector(forceQuitFromMenu))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        table.menu = menu
+    }
 
     @objc private func rowDoubleClicked(_ sender: Any?) {
         let row = table.clickedRow
@@ -184,27 +217,28 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         table.doubleAction = #selector(rowDoubleClicked(_:))
 
         if showProcess {
-            addColumn(id: "process", title: "Process Name", width: 160, key: .process,
+            addColumn(id: "process", title: "Process Name", width: 150, key: .process,
                       alignment: .left)
-            addColumn(id: "pid", title: "PID", width: 58, key: .pid, alignment: .right)
+            addColumn(id: "pid", title: "PID", width: 54, key: .pid, alignment: .right)
+            addColumn(id: "user", title: "User", width: 92, key: .user, alignment: .left)
         }
-        addColumn(id: "proto", title: "Protocol", width: 62, key: .proto, alignment: .left)
+        addColumn(id: "proto", title: "Protocol", width: 56, key: .proto, alignment: .left)
         // The .inset style spends 17pt between every column, so a sixth column
         // costs ~120pt of a 570pt pane. The local address is the same LAN IP on
         // every row of a single process, so the inspector spends that width on
         // the remote host instead; the wider top-level view keeps the column.
-        addColumn(id: "lport", title: "Local Port", width: 66, key: .lport,
+        addColumn(id: "lport", title: "Local Port", width: 62, key: .lport,
                   alignment: .right)
         addColumn(id: "rhost", title: "Remote Host", width: 190, key: .rhost,
                   alignment: .left)
-        addColumn(id: "rport", title: "Remote Port", width: 70, key: .rport,
+        addColumn(id: "rport", title: "Remote Port", width: 66, key: .rport,
                   alignment: .right)
-        addColumn(id: "state", title: "State", width: 86, key: .state, alignment: .left)
+        addColumn(id: "state", title: "State", width: 80, key: .state, alignment: .left)
         if showProcess {
             // netstat carries per-connection counters; libproc doesn't, so
             // these only appear in the system-wide view.
-            addColumn(id: "rcvd", title: "Rcvd", width: 80, key: .rcvd, alignment: .right)
-            addColumn(id: "sent", title: "Sent", width: 80, key: .sent, alignment: .right)
+            addColumn(id: "rcvd", title: "Rcvd", width: 74, key: .rcvd, alignment: .right)
+            addColumn(id: "sent", title: "Sent", width: 74, key: .sent, alignment: .right)
         }
 
         for col in table.tableColumns { col.resizingMask = [.userResizingMask] }
@@ -261,9 +295,16 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
 
     // MARK: - Columns
 
+    /// Columns that start hidden until the user says otherwise. The system-wide
+    /// view has ten columns and the .inset style spends 17pt between each, so
+    /// something has to give at a default window width; the local port is the
+    /// least informative (it's an ephemeral number) and it's one click away in
+    /// the "…" › Columns menu.
+    private var defaultHidden: Set<String> { showProcess ? ["lport"] : [] }
+
     private func applySavedColumns() {
         let d = UserDefaults.standard
-        let hidden = Set(d.stringArray(forKey: hiddenKey) ?? [])
+        let hidden = Set(d.stringArray(forKey: hiddenKey) ?? Array(defaultHidden))
         let widths = d.dictionary(forKey: widthsKey) as? [String: Double] ?? [:]
         isFittingColumns = true
         for col in table.tableColumns {
@@ -330,7 +371,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
             let usedW = table.rect(ofColumn: last).maxX + leadPad
             let overflow = usedW - clipW
             guard abs(overflow) > 0.5 else { break }
-            elastic.width = max(100, elastic.width - overflow)
+            elastic.width = max(90, elastic.width - overflow)
         }
     }
 
@@ -370,6 +411,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         switch sortKey {
         case .process: return byText { self.processLabel($0) }
         case .pid:     return by { $0.pid }
+        case .user:    return byText { self.owner($0.pid)?.user ?? "" }
         case .proto:   return byText { $0.proto.label }
         case .laddr:   return byText { $0.localAddr }
         case .lport:   return by { $0.localPort }
@@ -384,8 +426,21 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
 
     // MARK: - Data
 
+    /// Whether the Remote Host column shows PTR names or the raw address.
+    /// Shared by every connections table, persisted across launches.
+    private static let resolveKey = "ConnectionsResolveHostNames"
+    static var resolvesHostNames: Bool {
+        get { UserDefaults.standard.object(forKey: resolveKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: resolveKey) }
+    }
+
+    /// Re-render after the setting is toggled (it also changes the sort order,
+    /// since this column sorts on what's displayed).
+    func hostNameDisplayChanged() { applyFilterAndSort() }
+
     private func remoteHost(_ c: Connection) -> String {
         guard !c.remoteAddr.isEmpty else { return "—" }
+        guard Self.resolvesHostNames else { return c.remoteAddr }
         return HostResolver.shared.name(for: c.remoteAddr) ?? c.remoteAddr
     }
 
@@ -433,6 +488,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         switch id {
         case "process": return processLabel(c)
         case "pid":     return "\(c.pid)"
+        case "user":    return owner(c.pid)?.user ?? "—"
         case "proto":   return c.proto.label
         case "laddr":   return c.localAddr.isEmpty ? "—" : c.localAddr
         case "lport":   return c.localPort == 0 ? "—" : "\(c.localPort)"

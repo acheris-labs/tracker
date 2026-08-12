@@ -16,9 +16,13 @@ auto-update prompt.
   machine — process name (with its icon) and PID, protocol, local port, remote
   host, remote port, TCP state, and bytes received/sent per connection. It
   reads `netstat -anv`, so unlike the per-process view it isn't limited to
-  processes you own: root-owned daemons appear too. Sortable on every column,
-  filtered by the toolbar's search field, and double-clicking a row opens that
-  process's inspector.
+  processes you own: root-owned daemons appear too, with their owning user.
+  Sortable on every column and filtered by the toolbar's search field.
+  Double-click a row to inspect its process; the Quit / Inspect toolbar
+  buttons and Force Quit act on the selected connection's process (individual
+  connections can't be closed without root or a network extension). "…" ›
+  Resolve Host Names switches the Remote Host column between reverse-DNS
+  names and raw addresses.
 - **Connections tab in the per-process inspector.** Every TCP/UDP socket the
   process holds: protocol, local port, remote host, remote port and TCP state,
   sortable, refreshed on the existing tick. Remote addresses are resolved to

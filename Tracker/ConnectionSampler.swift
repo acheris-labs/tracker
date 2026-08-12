@@ -40,6 +40,7 @@ struct Connection: Hashable {
 struct ProcessOwner: Equatable {
     var name: String
     var execPath: String
+    var user: String
 
     /// Resolve straight from the kernel. proc_pidpath works for every process,
     /// including other users' — proc_name doesn't (it returns nothing for
@@ -50,7 +51,17 @@ struct ProcessOwner: Equatable {
         guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return nil }
         let path = String(cString: buf)
         guard !path.isEmpty else { return nil }
-        return ProcessOwner(name: (path as NSString).lastPathComponent, execPath: path)
+        return ProcessOwner(name: (path as NSString).lastPathComponent,
+                            execPath: path, user: user(pid: pid))
+    }
+
+    /// Owning user, resolved the same way the process list does it.
+    private static func user(pid: pid_t) -> String {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return "—" }
+        guard let pw = getpwuid(info.pbi_uid) else { return "\(info.pbi_uid)" }
+        return String(cString: pw.pointee.pw_name)
     }
 }
 

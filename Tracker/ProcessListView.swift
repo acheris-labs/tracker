@@ -759,19 +759,29 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     @objc func quitSelected() {
         guard let r = selectedRowIndex() else { NSSound.beep(); return }
-        sendSignal(SIGTERM, to: rows[r].pid)
+        quit(pid: rows[r].pid)
     }
 
-    @objc func forceQuitSelected() {
-        guard let r = selectedRowIndex() else { NSSound.beep(); return }
-        let snap = rows[r]
+    /// Same actions, addressed by pid — the Connections tab selects a
+    /// connection, not a process row.
+    func quit(pid: pid_t) {
+        sendSignal(SIGTERM, to: pid)
+    }
+
+    func forceQuit(pid: pid_t) {
+        let name = allRows.first(where: { $0.pid == pid })?.name ?? "\(pid)"
         let a = NSAlert()
-        a.messageText = "Force Quit “\(snap.name)” (\(snap.pid))?"
+        a.messageText = "Force Quit “\(name)” (\(pid))?"
         a.informativeText = "Force Quit skips normal cleanup. Unsaved work will be lost."
         a.alertStyle = .warning
         a.addButton(withTitle: "Force Quit")
         a.addButton(withTitle: "Cancel")
-        if a.runModal() == .alertFirstButtonReturn { sendSignal(SIGKILL, to: snap.pid) }
+        if a.runModal() == .alertFirstButtonReturn { sendSignal(SIGKILL, to: pid) }
+    }
+
+    @objc func forceQuitSelected() {
+        guard let r = selectedRowIndex() else { NSSound.beep(); return }
+        forceQuit(pid: rows[r].pid)
     }
 
     /// Live inspector panels, one per pid; updated from setSnapshots.
