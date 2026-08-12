@@ -602,9 +602,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         eUserChip.setColor(c.eUser)
         gpuChip.setColor(c.gpu)
         memoryChip.setColor(c.memory)
-        // Battery chip has no chart line; the corner indicator handles
-        // the color semantics. A clear dot keeps column alignment.
-        batteryChip?.setColor(.clear)
+        batteryChip?.setColor(c.battery)
         readChip.setColor(c.diskRead)
         writeChip.setColor(c.diskWrite)
     }

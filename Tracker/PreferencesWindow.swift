@@ -57,6 +57,7 @@ final class PreferencesWindowController: NSWindowController {
             ("E-core user",   \.eUser),
             ("GPU",           \.gpu),
         ]
+        if hasBattery { rows.append(("Battery", \.battery)) }
         rows.append(("Memory",     \.memory))
         rows.append(("Disk read",  \.diskRead))
         rows.append(("Disk write", \.diskWrite))

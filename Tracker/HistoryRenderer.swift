@@ -15,6 +15,7 @@ struct ChartColors {
     var pUser: NSColor
     var eUser: NSColor
     var gpu: NSColor
+    var battery: NSColor
     var memory: NSColor
     var diskRead: NSColor
     var diskWrite: NSColor
@@ -25,6 +26,7 @@ struct ChartColors {
         pUser:     NSColor(srgbRed: 0.20, green: 0.85, blue: 0.30, alpha: 1),
         eUser:     NSColor(srgbRed: 0.30, green: 0.62, blue: 1.00, alpha: 1),
         gpu:       NSColor(srgbRed: 0.70, green: 0.45, blue: 1.00, alpha: 1),
+        battery:   NSColor(srgbRed: 0.98, green: 0.45, blue: 0.75, alpha: 1),
         memory:    NSColor(srgbRed: 0.92, green: 0.92, blue: 0.92, alpha: 1),
         diskRead:  NSColor(srgbRed: 0.20, green: 0.85, blue: 0.85, alpha: 1),
         diskWrite: NSColor(srgbRed: 1.00, green: 0.85, blue: 0.25, alpha: 1)
@@ -34,6 +36,7 @@ struct ChartColors {
         pSys: "Color.pSys", eSys: "Color.eSys",
         pUser: "Color.pUser", eUser: "Color.eUser",
         gpu: "Color.gpu",
+        battery: "Color.battery",
         memory: "Color.memory",
         diskRead: "Color.diskRead", diskWrite: "Color.diskWrite"
     )
@@ -47,6 +50,7 @@ struct ChartColors {
             pUser:     d.string(forKey: keys.pUser).flatMap(NSColor.fromHex) ?? def.pUser,
             eUser:     d.string(forKey: keys.eUser).flatMap(NSColor.fromHex) ?? def.eUser,
             gpu:       d.string(forKey: keys.gpu).flatMap(NSColor.fromHex) ?? def.gpu,
+            battery:   d.string(forKey: keys.battery).flatMap(NSColor.fromHex) ?? def.battery,
             memory:    d.string(forKey: keys.memory).flatMap(NSColor.fromHex) ?? def.memory,
             diskRead:  d.string(forKey: keys.diskRead).flatMap(NSColor.fromHex) ?? def.diskRead,
             diskWrite: d.string(forKey: keys.diskWrite).flatMap(NSColor.fromHex) ?? def.diskWrite
@@ -60,6 +64,7 @@ struct ChartColors {
         d.set(pUser.hexString,     forKey: ChartColors.keys.pUser)
         d.set(eUser.hexString,     forKey: ChartColors.keys.eUser)
         d.set(gpu.hexString,       forKey: ChartColors.keys.gpu)
+        d.set(battery.hexString,   forKey: ChartColors.keys.battery)
         d.set(memory.hexString,    forKey: ChartColors.keys.memory)
         d.set(diskRead.hexString,  forKey: ChartColors.keys.diskRead)
         d.set(diskWrite.hexString, forKey: ChartColors.keys.diskWrite)
@@ -244,6 +249,11 @@ final class HistoryRenderer {
         // through), on top in the opaque menu-bar image so it stays visible
         // at high CPU load.
         if visible > 1 {
+            if showBattery, hasBattery {
+                drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                         bandY: inner.minY, bandH: cpuH,
+                         color: colors.battery, smoothed: smoothed) { $0.battery }
+            }
             if showMemory {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
