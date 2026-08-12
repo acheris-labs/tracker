@@ -1,0 +1,44 @@
+# Cask template for acheris-labs/homebrew-tools (Casks/tracker.rb).
+# Rendered by the release workflow with envsubst: VERSION and SHA_DMG come
+# from the release's signed, notarized, stapled DMG.
+#
+# Homebrew installs it; Sparkle updates it. `auto_updates true` is what keeps
+# the two from fighting - without it `brew upgrade` would reinstall the pinned
+# version over whatever Sparkle had already moved the user to. The livecheck
+# block points at our own appcast so Homebrew's tooling reads versions from
+# the same feed the app does.
+cask "tracker" do
+  version "${VERSION}"
+  sha256 "${SHA_DMG}"
+
+  url "https://github.com/acheris-labs/tracker/releases/download/v#{version}/Tracker-#{version}.dmg"
+  name "Tracker"
+  desc "Dock-icon system monitor: live CPU, GPU, memory, disk, and network"
+  homepage "https://github.com/acheris-labs/tracker"
+
+  livecheck do
+    url "https://acheris-labs.github.io/tracker/appcast.xml"
+    # The appcast carries a monotonic build number in sparkle:version, which
+    # the default strategy would append as "0.3.1,1786561010"; the cask tracks
+    # the release version, so take only the short string.
+    strategy :sparkle do |item|
+      item.short_version
+    end
+  end
+
+  auto_updates true
+  depends_on macos: :sonoma
+
+  app "Tracker.app"
+
+  uninstall quit: "net.acheris.tracker"
+
+  # `brew uninstall --zap tracker` also clears the chart colours, trace
+  # selection, window positions and Sparkle's update state, all of which live
+  # in the app's own preferences domain.
+  zap trash: [
+        "~/Library/Caches/net.acheris.tracker",
+        "~/Library/Preferences/net.acheris.tracker.plist",
+        "~/Library/Saved Application State/net.acheris.tracker.savedState",
+      ]
+end
