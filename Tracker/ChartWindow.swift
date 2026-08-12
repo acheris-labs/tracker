@@ -35,6 +35,14 @@ final class ChartView: NSView {
     override var isFlipped: Bool { false }
     override var wantsUpdateLayer: Bool { false }
 
+    private let tooltip = ChartTooltipView()
+    /// Last cursor position, kept so the tooltip can be recomputed as samples
+    /// scroll left underneath a stationary pointer.
+    private var lastMouse: NSPoint?
+    /// The series this view highlighted, so it only clears its own (the legend
+    /// chips drive the same renderer property).
+    private var hoveredSeries: ChartSeries?
+
     override func draw(_ dirtyRect: NSRect) {
         // The blown-up chart uses smoothed splines / stacked areas; the dock
         // icon keeps the crisp bars (renderer.render()). The card's background
@@ -54,6 +62,173 @@ final class ChartView: NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.borderColor = NSColor.separatorColor.cgColor
         }
+    }
+
+    // MARK: Hover tooltip
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        lastMouse = convert(event.locationInWindow, from: nil)
+        updateTooltip()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        lastMouse = nil
+        updateTooltip()
+    }
+
+    /// Resolve the cursor to a series and show its reading. Called on mouse
+    /// moves and once per refresh, so a parked pointer keeps reporting the
+    /// sample it's actually over as the history scrolls.
+    func updateTooltip() {
+        guard let renderer, let p = lastMouse,
+              let hit = renderer.hitTest(at: p, in: bounds,
+                                         light: effectiveAppearance.isLight) else {
+            clearTooltip()
+            return
+        }
+        if tooltip.superview == nil { addSubview(tooltip) }
+        tooltip.show(hit)
+        position(tooltip, near: hit.point)
+        if hoveredSeries != hit.series {
+            hoveredSeries = hit.series
+            renderer.highlightedSeries = hit.series
+            needsDisplay = true
+        }
+    }
+
+    private func clearTooltip() {
+        if tooltip.superview != nil { tooltip.removeFromSuperview() }
+        guard let series = hoveredSeries else { return }
+        hoveredSeries = nil
+        if renderer?.highlightedSeries == series {
+            renderer?.highlightedSeries = nil
+            needsDisplay = true
+        }
+    }
+
+    /// Offset from the point on the line, then kept inside the card — the card
+    /// clips its subviews, so a tooltip near an edge would be cut off.
+    private func position(_ view: NSView, near point: NSPoint) {
+        let margin: CGFloat = 6
+        var origin = NSPoint(x: point.x + 12, y: point.y + 12)
+        origin.x = min(origin.x, bounds.maxX - view.frame.width - margin)
+        origin.x = max(origin.x, bounds.minX + margin)
+        origin.y = min(origin.y, bounds.maxY - view.frame.height - margin)
+        origin.y = max(origin.y, bounds.minY + margin)
+        view.setFrameOrigin(origin)
+    }
+}
+
+// MARK: - Hover tooltip
+
+/// "● Disk read / 4.2 MB/s / 10:41:07" pinned near the hovered line. Draws its
+/// own background rather than holding CGColors, so it needs no appearance
+/// bookkeeping, and it's transparent to the mouse so hovering never fights
+/// with the hit-testing that produced it.
+final class ChartTooltipView: NSView {
+    private let dot = NSView()
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let valueLabel = NSTextField(labelWithString: "")
+    private let timeLabel = NSTextField(labelWithString: "")
+    private static let inset: CGFloat = 8
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "H:mm:ss"
+        return f
+    }()
+
+    private static let bytesFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .binary
+        f.allowedUnits = [.useKB, .useMB, .useGB]
+        return f
+    }()
+
+    init() {
+        super.init(frame: .zero)
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 4
+
+        // Same type scale as the legend and the process footers.
+        nameLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        nameLabel.textColor = .labelColor
+        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        valueLabel.textColor = .labelColor
+        timeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        timeLabel.textColor = .secondaryLabelColor
+
+        let title = NSStackView(views: [dot, nameLabel])
+        title.orientation = .horizontal
+        title.spacing = 6
+        title.alignment = .centerY
+
+        let stack = NSStackView(views: [title, valueLabel, timeLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 2
+        // The tooltip is positioned by hand, so its frame is set from the
+        // stack's fitting size. Only the top/leading edges are pinned: pinning
+        // all four would make the content force the container's height while
+        // the container's autoresizing constraint fixes it, and that conflict
+        // resolves to a zero-size (invisible) tooltip.
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        self.stack = stack
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: Self.inset),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.inset),
+            dot.widthAnchor.constraint(equalToConstant: 8),
+            dot.heightAnchor.constraint(equalToConstant: 8),
+        ])
+    }
+
+    private weak var stack: NSStackView?
+
+    required init?(coder: NSCoder) { fatalError("not implemented") }
+
+    /// The tooltip must never take the mouse: it sits under the cursor by
+    /// construction, and swallowing moves would make it flicker itself away.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func show(_ hit: ChartHit) {
+        dot.layer?.backgroundColor = hit.color.cgColor
+        nameLabel.stringValue = hit.series.label
+        valueLabel.stringValue = Self.format(hit)
+        timeLabel.stringValue = Self.timeFormatter.string(from: hit.time)
+        guard let stack else { return }
+        let content = stack.fittingSize
+        setFrameSize(NSSize(width: content.width + 2 * Self.inset,
+                            height: content.height + 2 * Self.inset))
+        needsDisplay = true
+    }
+
+    private static func format(_ hit: ChartHit) -> String {
+        switch hit.unit {
+        case .percent:
+            return String(format: "%.1f%%", hit.value)
+        case .bytesPerSecond:
+            return "\(bytesFormatter.string(fromByteCount: Int64(hit.value)))/s"
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                xRadius: 6, yRadius: 6)
+        NSColor.controlBackgroundColor.setFill()
+        path.fill()
+        NSColor.separatorColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 }
 
@@ -223,6 +398,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
                  memory: Double, diskRead: Double, diskWrite: Double,
                  netRx: Double = 0, netTx: Double = 0, swapUsed: Double = 0) {
         chartView.needsDisplay = true
+        chartView.updateTooltip()   // the sample under a parked cursor moves
         updateChips(cpu: cpu, gpu: gpu, battery: battery,
                     memory: memory, diskRead: diskRead, diskWrite: diskWrite,
                     netRx: netRx, netTx: netTx, swapUsed: swapUsed)

@@ -1,6 +1,7 @@
 import AppKit
 
 struct HistoryFrame {
+    let time: Date           // when sampled; hover tooltips report it
     let cpu: CPUFrame
     let gpu: Double
     let battery: Double      // 0..1; ignored when renderer.hasBattery == false
@@ -170,6 +171,37 @@ enum TraceSurface { case dock, chart }
 enum ChartSeries: Equatable {
     case pSys, eSys, pUser, eUser, gpu, battery, memory, swap
     case diskRead, diskWrite, netRx, netTx
+
+    /// Spelled out for the hover tooltip, where there's no column header to
+    /// lean on (the legend's own labels are abbreviated to fit its columns).
+    var label: String {
+        switch self {
+        case .pSys:      return "P-core system"
+        case .eSys:      return "E-core system"
+        case .pUser:     return "P-core user"
+        case .eUser:     return "E-core user"
+        case .gpu:       return "GPU"
+        case .battery:   return "Battery"
+        case .memory:    return "Memory"
+        case .swap:      return "Swap used"
+        case .diskRead:  return "Disk read"
+        case .diskWrite: return "Disk write"
+        case .netRx:     return "Network received"
+        case .netTx:     return "Network sent"
+        }
+    }
+}
+
+/// What a point in the chart resolved to: one series, the sample under the
+/// cursor, and where its line sits so a tooltip can be anchored to it.
+struct ChartHit: Equatable {
+    enum Unit { case percent, bytesPerSecond }
+    let series: ChartSeries
+    let color: NSColor       // as drawn, appearance-adjusted
+    let value: Double        // percent (0…100) or bytes/sec, per `unit`
+    let unit: Unit
+    let time: Date
+    let point: NSPoint       // on the line, in the chart's coordinates
 }
 
 final class HistoryRenderer {
@@ -238,7 +270,8 @@ final class HistoryRenderer {
         self.iconCapacity = max(8, min(Self.maxStorage, iconCapacity))
         self.chartCapacity = max(8, min(Self.maxStorage, chartCapacity))
         self.activeWindow = self.iconCapacity
-        self.frames = Array(repeating: HistoryFrame(cpu: CPUFrame(), gpu: 0, battery: 0,
+        self.frames = Array(repeating: HistoryFrame(time: Date(),
+                                                    cpu: CPUFrame(), gpu: 0, battery: 0,
                                                     memory: 0,
                                                     diskRead: 0, diskWrite: 0,
                                                     netRx: 0, netTx: 0, swap: 0),
@@ -259,7 +292,8 @@ final class HistoryRenderer {
     func append(cpu: CPUFrame, gpu: Double, battery: Double, memory: Double,
                 diskRead: Double, diskWrite: Double,
                 netRx: Double = 0, netTx: Double = 0, swap: Double = 0) {
-        frames[head] = HistoryFrame(cpu: cpu, gpu: gpu, battery: battery,
+        frames[head] = HistoryFrame(time: Date(),
+                                    cpu: cpu, gpu: gpu, battery: battery,
                                     memory: memory,
                                     diskRead: diskRead, diskWrite: diskWrite,
                                     netRx: netRx, netTx: netTx, swap: swap)
@@ -311,6 +345,110 @@ final class HistoryRenderer {
         let denom = log(maxRate / byteScaleMinRate)
         guard denom > 0 else { return 0 }
         return min(1.0, log(v / byteScaleMinRate) / denom)
+    }
+
+    /// How close (in points) the cursor has to be to a line to hover it.
+    private static let hitTolerance: CGFloat = 6
+    /// The distance credited to being inside a CPU band. Non-zero so a line
+    /// crossing the stack still wins when the cursor is right on it.
+    private static let bandHitDistance: CGFloat = 3
+
+    /// The series under `p`, or nil when the cursor isn't on anything — the
+    /// tooltip only appears over an actual line (or inside a CPU band). Uses
+    /// the same geometry as `draw`, for the chart window's window and traces.
+    func hitTest(at p: NSPoint, in rect: NSRect, light: Bool) -> ChartHit? {
+        activeWindow = chartCapacity
+        let visible = visibleCount()
+        guard visible > 1, rect.width > 0, rect.height > 0 else { return nil }
+
+        let colW = rect.width / CGFloat(activeWindow)
+        let xOffset = rect.width - CGFloat(visible) * colW
+        let i = Int(((p.x - rect.minX - xOffset - colW / 2) / colW).rounded())
+        guard i >= 0, i < visible else { return nil }
+
+        let f = frames[visibleIndex(i)]
+        let x = rect.minX + xOffset + CGFloat(i) * colW + colW / 2
+        let baseY = rect.minY
+        let H = rect.height
+        var best: (distance: CGFloat, hit: ChartHit)?
+
+        func offer(_ series: ChartSeries, _ base: NSColor, value: Double,
+                   unit: ChartHit.Unit, y: CGFloat, distance: CGFloat) {
+            guard distance <= Self.hitTolerance else { return }
+            if let b = best, b.distance <= distance { return }
+            best = (distance, ChartHit(series: series,
+                                       color: base.onSurface(light: light),
+                                       value: value, unit: unit, time: f.time,
+                                       point: NSPoint(x: x, y: y)))
+        }
+
+        /// A plotted line: hit when the cursor is near it. Zero-valued samples
+        /// are skipped because drawLine leaves a gap there rather than a line.
+        func line(_ series: ChartSeries, _ base: NSColor, value: Double,
+                  unit: ChartHit.Unit, norm: Double) {
+            guard norm > 0.001 else { return }
+            let y = baseY + CGFloat(norm) * H
+            offer(series, base, value: value, unit: unit, y: y,
+                  distance: abs(p.y - y))
+        }
+
+        if chartTraces.contains(.battery), hasBattery {
+            line(.battery, colors.battery, value: f.battery * 100,
+                 unit: .percent, norm: f.battery)
+        }
+        if chartTraces.contains(.memory) {
+            line(.memory, colors.memory, value: f.memory * 100,
+                 unit: .percent, norm: f.memory)
+        }
+        if chartTraces.contains(.swap) {
+            line(.swap, colors.swap, value: f.swap * 100,
+                 unit: .percent, norm: f.swap)
+        }
+        if chartTraces.contains(.disk) || chartTraces.contains(.network) {
+            let maxRate = byteScaleMax(visible: visible, traces: chartTraces)
+            if chartTraces.contains(.network) {
+                line(.netRx, colors.netRx, value: f.netRx, unit: .bytesPerSecond,
+                     norm: Self.logNorm(f.netRx, maxRate: maxRate))
+                line(.netTx, colors.netTx, value: f.netTx, unit: .bytesPerSecond,
+                     norm: Self.logNorm(f.netTx, maxRate: maxRate))
+            }
+            if chartTraces.contains(.disk) {
+                line(.diskRead, colors.diskRead, value: f.diskRead,
+                     unit: .bytesPerSecond,
+                     norm: Self.logNorm(f.diskRead, maxRate: maxRate))
+                line(.diskWrite, colors.diskWrite, value: f.diskWrite,
+                     unit: .bytesPerSecond,
+                     norm: Self.logNorm(f.diskWrite, maxRate: maxRate))
+            }
+        }
+        if chartTraces.contains(.gpu) {
+            line(.gpu, colors.gpu, value: f.gpu * 100, unit: .percent, norm: f.gpu)
+        }
+        if chartTraces.contains(.cpu) {
+            // Filled bands, so anywhere inside one counts as being on it. The
+            // reported value is the group's own utilization (what the legend
+            // shows); the band's *height* is that weighted by core share.
+            let bands: [(ChartSeries, NSColor, Double, Double)] = [
+                (.pSys,  colors.pSys,  f.cpu.pSys,  f.cpu.pSys  * pWeight),
+                (.eSys,  colors.eSys,  f.cpu.eSys,  f.cpu.eSys  * eWeight),
+                (.pUser, colors.pUser, f.cpu.pUser, f.cpu.pUser * pWeight),
+                (.eUser, colors.eUser, f.cpu.eUser, f.cpu.eUser * eWeight),
+            ]
+            var lower = baseY
+            for (series, color, value, share) in bands {
+                let upper = lower + CGFloat(share) * H
+                defer { lower = upper }
+                guard upper - lower > 0.5 else { continue }
+                // Inside the band, or grazing the bright edge stroke drawn
+                // along its top — thin bands are otherwise almost unhittable.
+                let distance = (p.y >= lower && p.y <= upper)
+                    ? Self.bandHitDistance
+                    : abs(p.y - upper)
+                offer(series, color, value: value * 100, unit: .percent,
+                      y: upper, distance: distance)
+            }
+        }
+        return best?.hit
     }
 
     func render() -> NSImage {

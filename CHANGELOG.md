@@ -12,6 +12,10 @@ auto-update prompt.
 ## [Unreleased]
 
 ### Added
+- **Chart hover readouts.** Hovering a line (or a CPU band) in the Chart view
+  spotlights it and shows a small panel with the series, its value at that
+  moment, and the time it was sampled. Hovering empty space shows nothing —
+  the readout is always for one specific trace.
 - **Light mode.** Preferences gains an Appearance control — Auto (default,
   follows System Settings live), Light, or Dark — and the whole app honors
   it, chart included. On a light card the chart palette is adjusted for
