@@ -186,7 +186,10 @@ final class HistoryRenderer {
     private func seriesColor(_ base: NSColor, _ series: ChartSeries,
                              smoothed: Bool) -> NSColor {
         guard smoothed, let h = highlightedSeries, h != series else { return base }
-        return base.blended(withFraction: 0.75, of: NSColor(white: 0.35, alpha: 1)) ?? base
+        // Nearly extinguish non-highlighted series: heavy blend toward a
+        // dark neutral plus an alpha cut, so even bright hues recede.
+        let ghost = base.blended(withFraction: 0.88, of: NSColor(white: 0.25, alpha: 1)) ?? base
+        return ghost.withAlphaComponent(0.55)
     }
 
     init(iconCapacity: Int, chartCapacity: Int, numP: Int, numE: Int,
