@@ -1,6 +1,7 @@
 import AppKit
 
 struct HistoryFrame {
+    let time: Date           // when sampled; hover tooltips report it
     let cpu: CPUFrame
     let gpu: Double
     let battery: Double      // 0..1; ignored when renderer.hasBattery == false
@@ -109,6 +110,32 @@ extension NSColor {
                        blue: f(c.blueComponent), alpha: c.alphaComponent)
     }
 
+    /// The mirror image of `lifted(by:)`, for the light chart: there a
+    /// translucent fill reads *lighter* than the opaque original.
+    func darkened(by amount: CGFloat) -> NSColor {
+        guard let c = usingColorSpace(.sRGB) else { return self }
+        func f(_ v: CGFloat) -> CGFloat { max(0, v * (1 - amount)) }
+        return NSColor(srgbRed: f(c.redComponent), green: f(c.greenComponent),
+                       blue: f(c.blueComponent), alpha: c.alphaComponent)
+    }
+
+    /// The palette is tuned for the near-black card; on a white one the pale
+    /// members (memory's near-white, the network hues) disappear. Cap
+    /// brightness — hard for near-neutral colours, which have no hue to carry
+    /// them — and bump saturation a little so the hue grouping survives.
+    /// Applied at draw time so custom colours get the same treatment.
+    func legibleOnLight() -> NSColor {
+        guard let c = usingColorSpace(.sRGB) else { return self }
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        let cap: CGFloat = s < 0.15 ? 0.45 : 0.78
+        return NSColor(hue: h, saturation: min(1, s * 1.15),
+                       brightness: min(b, cap), alpha: a)
+    }
+
+    /// The colour as drawn on the given surface (see `legibleOnLight`).
+    func onSurface(light: Bool) -> NSColor { light ? legibleOnLight() : self }
+
     static func fromHex(_ s: String) -> NSColor? {
         var t = s
         if t.hasPrefix("#") { t.removeFirst() }
@@ -144,6 +171,37 @@ enum TraceSurface { case dock, chart }
 enum ChartSeries: Equatable {
     case pSys, eSys, pUser, eUser, gpu, battery, memory, swap
     case diskRead, diskWrite, netRx, netTx
+
+    /// Spelled out for the hover tooltip, where there's no column header to
+    /// lean on (the legend's own labels are abbreviated to fit its columns).
+    var label: String {
+        switch self {
+        case .pSys:      return "P-core system"
+        case .eSys:      return "E-core system"
+        case .pUser:     return "P-core user"
+        case .eUser:     return "E-core user"
+        case .gpu:       return "GPU"
+        case .battery:   return "Battery"
+        case .memory:    return "Memory"
+        case .swap:      return "Swap used"
+        case .diskRead:  return "Disk read"
+        case .diskWrite: return "Disk write"
+        case .netRx:     return "Network received"
+        case .netTx:     return "Network sent"
+        }
+    }
+}
+
+/// What a point in the chart resolved to: one series, the sample under the
+/// cursor, and where its line sits so a tooltip can be anchored to it.
+struct ChartHit: Equatable {
+    enum Unit { case percent, bytesPerSecond }
+    let series: ChartSeries
+    let color: NSColor       // as drawn, appearance-adjusted
+    let value: Double        // percent (0…100) or bytes/sec, per `unit`
+    let unit: Unit
+    let time: Date
+    let point: NSPoint       // on the line, in the chart's coordinates
 }
 
 final class HistoryRenderer {
@@ -161,6 +219,8 @@ final class HistoryRenderer {
     private(set) var chartCapacity: Int   // chart window view
     /// Window used by the draw helpers; set on entry to draw()/diskScaleMax().
     private var activeWindow: Int = 8
+    /// Whether the surface being drawn is light; set on entry to draw().
+    private var lightMode: Bool = false
 
     private let pointSize = NSSize(width: 128, height: 128)
     private let pixelScale: CGFloat = 2
@@ -188,14 +248,18 @@ final class HistoryRenderer {
     /// rest (legend hover). The dock icon ignores it.
     var highlightedSeries: ChartSeries?
 
-    /// The series' colour, dimmed toward neutral when another series is
-    /// highlighted. Blending (not alpha) keeps the band-alpha math intact.
+    /// The series' colour as drawn: adjusted for a light surface, then dimmed
+    /// toward the background when another series is highlighted. Blending (not
+    /// alpha) keeps the band-alpha math intact.
     private func seriesColor(_ base: NSColor, _ series: ChartSeries,
                              smoothed: Bool) -> NSColor {
-        guard smoothed, let h = highlightedSeries, h != series else { return base }
+        let c = base.onSurface(light: lightMode)
+        guard smoothed, let h = highlightedSeries, h != series else { return c }
         // Nearly extinguish non-highlighted series: heavy blend toward a
-        // dark neutral plus an alpha cut, so even bright hues recede.
-        let ghost = base.blended(withFraction: 0.88, of: NSColor(white: 0.25, alpha: 1)) ?? base
+        // neutral near the background plus an alpha cut, so even bright hues
+        // recede.
+        let neutral = NSColor(white: lightMode ? 0.80 : 0.25, alpha: 1)
+        let ghost = c.blended(withFraction: 0.88, of: neutral) ?? c
         return ghost.withAlphaComponent(0.55)
     }
 
@@ -206,7 +270,8 @@ final class HistoryRenderer {
         self.iconCapacity = max(8, min(Self.maxStorage, iconCapacity))
         self.chartCapacity = max(8, min(Self.maxStorage, chartCapacity))
         self.activeWindow = self.iconCapacity
-        self.frames = Array(repeating: HistoryFrame(cpu: CPUFrame(), gpu: 0, battery: 0,
+        self.frames = Array(repeating: HistoryFrame(time: Date(),
+                                                    cpu: CPUFrame(), gpu: 0, battery: 0,
                                                     memory: 0,
                                                     diskRead: 0, diskWrite: 0,
                                                     netRx: 0, netTx: 0, swap: 0),
@@ -227,22 +292,51 @@ final class HistoryRenderer {
     func append(cpu: CPUFrame, gpu: Double, battery: Double, memory: Double,
                 diskRead: Double, diskWrite: Double,
                 netRx: Double = 0, netTx: Double = 0, swap: Double = 0) {
-        frames[head] = HistoryFrame(cpu: cpu, gpu: gpu, battery: battery,
+        frames[head] = HistoryFrame(time: Date(),
+                                    cpu: cpu, gpu: gpu, battery: battery,
                                     memory: memory,
                                     diskRead: diskRead, diskWrite: diskWrite,
                                     netRx: netRx, netTx: netTx, swap: swap)
         head = (head + 1) % Self.maxStorage
+        totalAppended += 1
         if count < Self.maxStorage { count += 1 }
     }
 
+    /// Samples appended since launch — the clock the chart's freeze is
+    /// measured against (`count` saturates once storage is full).
+    private var totalAppended: Int = 0
+    /// While set, the chart window renders the history as it stood at this
+    /// sample count, so a hovered point doesn't crawl out from under the
+    /// cursor. The dock icon ignores it and keeps scrolling.
+    private var frozenAt: Int?
+
+    /// Freeze/unfreeze the chart's view of the history (`freezeChart(false)`
+    /// snaps back to live).
+    func freezeChart(_ on: Bool) {
+        frozenAt = on ? (frozenAt ?? totalAppended) : nil
+    }
+
+    var isChartFrozen: Bool { frozenAt != nil }
+
+    /// Whether the surface being drawn is the chart window; set on entry to
+    /// draw()/hitTest(), like `activeWindow`.
+    private var chartSurface = false
+
+    /// How many samples behind live the current surface is drawing.
+    private func lag() -> Int {
+        // Only the chart freezes; the dock icon always draws the newest data.
+        guard chartSurface, let frozen = frozenAt else { return 0 }
+        return max(0, min(totalAppended - frozen, Self.maxStorage - 1))
+    }
+
     private func visibleCount() -> Int {
-        return min(count, activeWindow)
+        return max(0, min(count - lag(), activeWindow))
     }
 
     /// Index in `frames` for the i-th visible sample (0 = oldest visible).
     private func visibleIndex(_ i: Int) -> Int {
         let visible = visibleCount()
-        return (head - visible + i + Self.maxStorage * 2) % Self.maxStorage
+        return (head - lag() - visible + i + Self.maxStorage * 2) % Self.maxStorage
     }
 
     /// Bottom of the shared logarithmic bytes/sec scale — rates at or below
@@ -254,6 +348,7 @@ final class HistoryRenderer {
     /// 1 MiB/s. Log lets wildly different families share one honest axis.
     func byteScaleMax() -> Double {
         activeWindow = chartCapacity   // the chart's right axis uses this
+        chartSurface = true
         return byteScaleMax(visible: visibleCount(), traces: chartTraces)
     }
 
@@ -281,6 +376,113 @@ final class HistoryRenderer {
         return min(1.0, log(v / byteScaleMinRate) / denom)
     }
 
+    /// How close (in points) the cursor has to be to a line to hover it.
+    /// Generous on purpose: these are 1–2.5pt splines, and anything tighter
+    /// makes the reading a game of skill.
+    private static let hitTolerance: CGFloat = 12
+    /// The distance credited to being inside a CPU band. Non-zero so a line
+    /// crossing the stack still wins when the cursor is right on it.
+    private static let bandHitDistance: CGFloat = 3
+
+    /// The series under `p`, or nil when the cursor isn't on anything — the
+    /// tooltip only appears over an actual line (or inside a CPU band). Uses
+    /// the same geometry as `draw`, for the chart window's window and traces.
+    func hitTest(at p: NSPoint, in rect: NSRect, light: Bool) -> ChartHit? {
+        activeWindow = chartCapacity
+        chartSurface = true
+        let visible = visibleCount()
+        guard visible > 1, rect.width > 0, rect.height > 0 else { return nil }
+
+        let colW = rect.width / CGFloat(activeWindow)
+        let xOffset = rect.width - CGFloat(visible) * colW
+        let i = Int(((p.x - rect.minX - xOffset - colW / 2) / colW).rounded())
+        guard i >= 0, i < visible else { return nil }
+
+        let f = frames[visibleIndex(i)]
+        let x = rect.minX + xOffset + CGFloat(i) * colW + colW / 2
+        let baseY = rect.minY
+        let H = rect.height
+        var best: (distance: CGFloat, hit: ChartHit)?
+
+        func offer(_ series: ChartSeries, _ base: NSColor, value: Double,
+                   unit: ChartHit.Unit, y: CGFloat, distance: CGFloat) {
+            guard distance <= Self.hitTolerance else { return }
+            if let b = best, b.distance <= distance { return }
+            best = (distance, ChartHit(series: series,
+                                       color: base.onSurface(light: light),
+                                       value: value, unit: unit, time: f.time,
+                                       point: NSPoint(x: x, y: y)))
+        }
+
+        /// A plotted line: hit when the cursor is near it. Zero-valued samples
+        /// are skipped because drawLine leaves a gap there rather than a line.
+        func line(_ series: ChartSeries, _ base: NSColor, value: Double,
+                  unit: ChartHit.Unit, norm: Double) {
+            guard norm > 0.001 else { return }
+            let y = baseY + CGFloat(norm) * H
+            offer(series, base, value: value, unit: unit, y: y,
+                  distance: abs(p.y - y))
+        }
+
+        if chartTraces.contains(.battery), hasBattery {
+            line(.battery, colors.battery, value: f.battery * 100,
+                 unit: .percent, norm: f.battery)
+        }
+        if chartTraces.contains(.memory) {
+            line(.memory, colors.memory, value: f.memory * 100,
+                 unit: .percent, norm: f.memory)
+        }
+        if chartTraces.contains(.swap) {
+            line(.swap, colors.swap, value: f.swap * 100,
+                 unit: .percent, norm: f.swap)
+        }
+        if chartTraces.contains(.disk) || chartTraces.contains(.network) {
+            let maxRate = byteScaleMax(visible: visible, traces: chartTraces)
+            if chartTraces.contains(.network) {
+                line(.netRx, colors.netRx, value: f.netRx, unit: .bytesPerSecond,
+                     norm: Self.logNorm(f.netRx, maxRate: maxRate))
+                line(.netTx, colors.netTx, value: f.netTx, unit: .bytesPerSecond,
+                     norm: Self.logNorm(f.netTx, maxRate: maxRate))
+            }
+            if chartTraces.contains(.disk) {
+                line(.diskRead, colors.diskRead, value: f.diskRead,
+                     unit: .bytesPerSecond,
+                     norm: Self.logNorm(f.diskRead, maxRate: maxRate))
+                line(.diskWrite, colors.diskWrite, value: f.diskWrite,
+                     unit: .bytesPerSecond,
+                     norm: Self.logNorm(f.diskWrite, maxRate: maxRate))
+            }
+        }
+        if chartTraces.contains(.gpu) {
+            line(.gpu, colors.gpu, value: f.gpu * 100, unit: .percent, norm: f.gpu)
+        }
+        if chartTraces.contains(.cpu) {
+            // Filled bands, so anywhere inside one counts as being on it. The
+            // reported value is the group's own utilization (what the legend
+            // shows); the band's *height* is that weighted by core share.
+            let bands: [(ChartSeries, NSColor, Double, Double)] = [
+                (.pSys,  colors.pSys,  f.cpu.pSys,  f.cpu.pSys  * pWeight),
+                (.eSys,  colors.eSys,  f.cpu.eSys,  f.cpu.eSys  * eWeight),
+                (.pUser, colors.pUser, f.cpu.pUser, f.cpu.pUser * pWeight),
+                (.eUser, colors.eUser, f.cpu.eUser, f.cpu.eUser * eWeight),
+            ]
+            var lower = baseY
+            for (series, color, value, share) in bands {
+                let upper = lower + CGFloat(share) * H
+                defer { lower = upper }
+                guard upper - lower > 0.5 else { continue }
+                // Inside the band, or grazing the bright edge stroke drawn
+                // along its top — thin bands are otherwise almost unhittable.
+                let distance = (p.y >= lower && p.y <= upper)
+                    ? Self.bandHitDistance
+                    : abs(p.y - upper)
+                offer(series, color, value: value * 100, unit: .percent,
+                      y: upper, distance: distance)
+            }
+        }
+        return best?.hit
+    }
+
     func render() -> NSImage {
         let pixelW = Int(pointSize.width * pixelScale)
         let pixelH = Int(pointSize.height * pixelScale)
@@ -300,20 +502,28 @@ final class HistoryRenderer {
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         defer { NSGraphicsContext.current = prevCtx }
 
-        draw(in: NSRect(origin: .zero, size: pointSize))
+        // No view to inherit an appearance from; the Dock is system chrome, so
+        // the tile follows System Settings rather than the app's override.
+        draw(in: NSRect(origin: .zero, size: pointSize),
+             light: AppearanceMode.systemIsLight)
 
         let image = NSImage(size: pointSize)
         image.addRepresentation(rep)
         return image
     }
 
-    /// `background` defaults to the dark fill the menu-bar icon needs; the
-    /// Chart window passes a system color so the card tracks the appearance.
-    func draw(in rect: NSRect, smoothed: Bool = false,
-              background: NSColor = NSColor(white: 0.04, alpha: 1)) {
+    /// `light` selects the palette treatment and the dock icon's card colour;
+    /// the chart card uses the system text background either way, so it tracks
+    /// the appearance like the process tables do.
+    func draw(in rect: NSRect, smoothed: Bool = false, light: Bool = false) {
         // smoothed == the chart window; crisp == the dock icon.
         activeWindow = smoothed ? chartCapacity : iconCapacity
+        chartSurface = smoothed
+        lightMode = light
         let traces = smoothed ? chartTraces : iconTraces
+        let background: NSColor = smoothed
+            ? .textBackgroundColor
+            : NSColor(white: light ? 0.97 : 0.04, alpha: 1)
         background.setFill()
         rect.fill()
 
@@ -421,6 +631,12 @@ final class HistoryRenderer {
                                  seriesColor(pUsrColor, .pUser, smoothed: true),
                                  seriesColor(eUsrColor, .eUser, smoothed: true)])
         } else if traces.contains(.cpu) {
+            // Opaque bars, but still appearance-adjusted (no highlight dimming
+            // applies here — smoothed: false).
+            let barPSys = seriesColor(pSysColor, .pSys,  smoothed: false)
+            let barESys = seriesColor(eSysColor, .eSys,  smoothed: false)
+            let barPUsr = seriesColor(pUsrColor, .pUser, smoothed: false)
+            let barEUsr = seriesColor(eUsrColor, .eUser, smoothed: false)
             for i in 0..<visible {
                 let f = frames[visibleIndex(i)]
                 let x = inner.minX + xOffset + CGFloat(i) * colW
@@ -431,16 +647,16 @@ final class HistoryRenderer {
                 let eUsr = CGFloat(f.cpu.eUser * eWeight) * cpuH
 
                 var y = inner.minY
-                pSysColor.setFill()
+                barPSys.setFill()
                 NSRect(x: x, y: y, width: colW, height: pSys).fill()
                 y += pSys
-                eSysColor.setFill()
+                barESys.setFill()
                 NSRect(x: x, y: y, width: colW, height: eSys).fill()
                 y += eSys
-                pUsrColor.setFill()
+                barPUsr.setFill()
                 NSRect(x: x, y: y, width: colW, height: pUsr).fill()
                 y += pUsr
-                eUsrColor.setFill()
+                barEUsr.setFill()
                 NSRect(x: x, y: y, width: colW, height: eUsr).fill()
             }
         }
@@ -448,7 +664,8 @@ final class HistoryRenderer {
         if visible > 1, traces.contains(.gpu), !smoothed {
             drawLine(visible: visible, xOffset: xOffset, colW: colW,
                      bandY: inner.minY, bandH: cpuH,
-                     color: colors.gpu, smoothed: false) { $0.gpu }
+                     color: seriesColor(colors.gpu, .gpu, smoothed: false),
+                     smoothed: false) { $0.gpu }
         }
 
         NSGraphicsContext.current?.cgContext.restoreGState()
@@ -512,7 +729,10 @@ final class HistoryRenderer {
             tops[4].append(NSPoint(x: x, y: y4))
         }
         for k in 1...4 {
-            let c = bandColors[k - 1].lifted(by: Self.bandLift)
+            // Alpha pulls a fill toward the background, so compensate away
+            // from it: lift toward white on the dark card, darken on the light.
+            let c = lightMode ? bandColors[k - 1].darkened(by: Self.bandLift)
+                              : bandColors[k - 1].lifted(by: Self.bandLift)
             Self.fillVertical(Self.ribbon(upper: tops[k], lower: tops[k - 1]),
                               top: c.withAlphaComponent(Self.bandAlphaTop),
                               bottom: c.withAlphaComponent(Self.bandAlphaBottom))

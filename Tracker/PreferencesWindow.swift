@@ -6,6 +6,7 @@ final class PreferencesWindowController: NSWindowController {
     private var iconTraces: Set<ChartTrace>
     private var chartTraces: Set<ChartTrace>
     private let onThresholdChange: (Int) -> Void
+    private let onAppearanceChange: (AppearanceMode) -> Void
     private weak var thresholdLabel: NSTextField?
 
 
@@ -20,12 +21,15 @@ final class PreferencesWindowController: NSWindowController {
          iconTraces: Set<ChartTrace>,
          chartTraces: Set<ChartTrace>,
          drainThreshold: Int,
+         appearance: AppearanceMode,
          onColorsChange: @escaping (ChartColors) -> Void,
          onTracesChange: @escaping (TraceSurface, Set<ChartTrace>) -> Void,
-         onThresholdChange: @escaping (Int) -> Void) {
+         onThresholdChange: @escaping (Int) -> Void,
+         onAppearanceChange: @escaping (AppearanceMode) -> Void) {
         self.colors = colors
         self.onColorsChange = onColorsChange
         self.onTracesChange = onTracesChange
+        self.onAppearanceChange = onAppearanceChange
         self.iconTraces = iconTraces
         self.chartTraces = chartTraces
         self.onThresholdChange = onThresholdChange
@@ -67,6 +71,15 @@ final class PreferencesWindowController: NSWindowController {
         // Trace table: one row per trace — label · color well(s) · where it
         // shows (Dock / Chart).
         buildTraceTable(grid: grid, hasBattery: hasBattery)
+
+        // Appearance: Auto follows System Settings.
+        let modes = AppearanceMode.allCases
+        let appearancePicker = NSSegmentedControl(
+            labels: modes.map(\.label), trackingMode: .selectOne,
+            target: self, action: #selector(appearanceChanged(_:)))
+        appearancePicker.selectedSegment = modes.firstIndex(of: appearance) ?? 0
+        appearancePicker.segmentDistribution = .fillEqually
+        grid.addRow(with: [Self.label("Appearance:"), appearancePicker])
 
         // Drain alert threshold (W) — slider + value label.
         let slider = NSSlider(value: Double(initialThreshold),
@@ -229,6 +242,12 @@ final class PreferencesWindowController: NSWindowController {
             else { chartTraces.remove(trace) }
             onTracesChange(.chart, chartTraces)
         }
+    }
+
+    @objc private func appearanceChanged(_ sender: NSSegmentedControl) {
+        let modes = AppearanceMode.allCases
+        guard sender.selectedSegment >= 0, sender.selectedSegment < modes.count else { return }
+        onAppearanceChange(modes[sender.selectedSegment])
     }
 
     @objc private func thresholdChanged(_ sender: NSSlider) {

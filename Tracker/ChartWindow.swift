@@ -35,11 +35,255 @@ final class ChartView: NSView {
     override var isFlipped: Bool { false }
     override var wantsUpdateLayer: Bool { false }
 
+    private let tooltip = ChartTooltipView()
+    /// Shown while the hover freeze is in effect, so a chart that has stopped
+    /// moving doesn't read as a stalled app.
+    private let pausedLabel: NSTextField = {
+        let t = NSTextField(labelWithString: "Paused")
+        t.font = .systemFont(ofSize: 9, weight: .semibold)
+        t.textColor = .secondaryLabelColor
+        t.isHidden = true
+        return t
+    }()
+    /// Last cursor position, kept so the tooltip can be recomputed as samples
+    /// scroll left underneath a stationary pointer.
+    private var lastMouse: NSPoint?
+    /// The series this view highlighted, so it only clears its own (the legend
+    /// chips drive the same renderer property).
+    private var hoveredSeries: ChartSeries?
+
     override func draw(_ dirtyRect: NSRect) {
         // The blown-up chart uses smoothed splines / stacked areas; the dock
         // icon keeps the crisp bars (renderer.render()). The card's background
         // is the system text background so it matches the process tables.
-        renderer?.draw(in: bounds, smoothed: true, background: .textBackgroundColor)
+        renderer?.draw(in: bounds, smoothed: true, light: effectiveAppearance.isLight)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyBorderColor()
+        needsDisplay = true
+    }
+
+    /// See FooterPane: the border is a resolved CGColor snapshot, so it has to
+    /// be re-taken whenever the appearance changes.
+    func applyBorderColor() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = NSColor.separatorColor.cgColor
+        }
+    }
+
+    // MARK: Hover tooltip
+
+    override func layout() {
+        super.layout()
+        if pausedLabel.superview == nil { addSubview(pausedLabel) }
+        pausedLabel.sizeToFit()
+        pausedLabel.setFrameOrigin(NSPoint(x: bounds.minX + 8,
+                                           y: bounds.maxY - pausedLabel.frame.height - 6))
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        // Hold the history still while the cursor is over the chart: at 1 Hz
+        // the sample you're pointing at slides out from under you otherwise.
+        renderer?.freezeChart(true)
+        pausedLabel.isHidden = false
+        mouseMoved(with: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        lastMouse = convert(event.locationInWindow, from: nil)
+        updateTooltip()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        endHover()
+    }
+
+    /// Re-derive the hover from where the cursor actually is. mouseExited is
+    /// not guaranteed: switching apps, the window losing key, or the tab
+    /// changing all leave the pointer "inside" as far as tracking areas are
+    /// concerned, and the chart would stay frozen forever. Called every
+    /// refresh, so the freeze can never outlive the hover by more than a tick.
+    func syncHoverFromCursor() {
+        guard let window, window.isVisible, NSApp.isActive, window.isKeyWindow,
+              !isHiddenOrHasHiddenAncestor else {
+            endHover()
+            return
+        }
+        let p = convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        guard bounds.contains(p) else {
+            endHover()
+            return
+        }
+        lastMouse = p
+        renderer?.freezeChart(true)
+        pausedLabel.isHidden = false
+        updateTooltip()
+    }
+
+    private func endHover() {
+        let wasHovering = lastMouse != nil || renderer?.isChartFrozen == true
+        lastMouse = nil
+        renderer?.freezeChart(false)
+        pausedLabel.isHidden = true
+        updateTooltip()
+        if wasHovering { needsDisplay = true }
+    }
+
+    /// Resolve the cursor to a series and show its reading. Called on mouse
+    /// moves and once per refresh, so a parked pointer keeps reporting the
+    /// sample it's actually over as the history scrolls.
+    func updateTooltip() {
+        guard let renderer, let p = lastMouse,
+              let hit = renderer.hitTest(at: p, in: bounds,
+                                         light: effectiveAppearance.isLight) else {
+            clearTooltip()
+            return
+        }
+        if tooltip.superview == nil { addSubview(tooltip) }
+        tooltip.show(hit)
+        position(tooltip, near: hit.point)
+        if hoveredSeries != hit.series {
+            hoveredSeries = hit.series
+            renderer.highlightedSeries = hit.series
+            needsDisplay = true
+        }
+    }
+
+    private func clearTooltip() {
+        if tooltip.superview != nil { tooltip.removeFromSuperview() }
+        guard let series = hoveredSeries else { return }
+        hoveredSeries = nil
+        if renderer?.highlightedSeries == series {
+            renderer?.highlightedSeries = nil
+            needsDisplay = true
+        }
+    }
+
+    /// Offset from the point on the line, then kept inside the card — the card
+    /// clips its subviews, so a tooltip near an edge would be cut off.
+    private func position(_ view: NSView, near point: NSPoint) {
+        let margin: CGFloat = 6
+        var origin = NSPoint(x: point.x + 12, y: point.y + 12)
+        origin.x = min(origin.x, bounds.maxX - view.frame.width - margin)
+        origin.x = max(origin.x, bounds.minX + margin)
+        origin.y = min(origin.y, bounds.maxY - view.frame.height - margin)
+        origin.y = max(origin.y, bounds.minY + margin)
+        view.setFrameOrigin(origin)
+    }
+}
+
+// MARK: - Hover tooltip
+
+/// "● Disk read / 4.2 MB/s / 10:41:07" pinned near the hovered line. Draws its
+/// own background rather than holding CGColors, so it needs no appearance
+/// bookkeeping, and it's transparent to the mouse so hovering never fights
+/// with the hit-testing that produced it.
+final class ChartTooltipView: NSView {
+    private let dot = NSView()
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let valueLabel = NSTextField(labelWithString: "")
+    private let timeLabel = NSTextField(labelWithString: "")
+    private static let inset: CGFloat = 8
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "H:mm:ss"
+        return f
+    }()
+
+    private static let bytesFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .binary
+        f.allowedUnits = [.useKB, .useMB, .useGB]
+        return f
+    }()
+
+    init() {
+        super.init(frame: .zero)
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 4
+
+        // Same type scale as the legend and the process footers.
+        nameLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        nameLabel.textColor = .labelColor
+        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        valueLabel.textColor = .labelColor
+        timeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        timeLabel.textColor = .secondaryLabelColor
+
+        let title = NSStackView(views: [dot, nameLabel])
+        title.orientation = .horizontal
+        title.spacing = 6
+        title.alignment = .centerY
+
+        let stack = NSStackView(views: [title, valueLabel, timeLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 2
+        // The tooltip is positioned by hand, so its frame is set from the
+        // stack's fitting size. Only the top/leading edges are pinned: pinning
+        // all four would make the content force the container's height while
+        // the container's autoresizing constraint fixes it, and that conflict
+        // resolves to a zero-size (invisible) tooltip.
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        self.stack = stack
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: Self.inset),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.inset),
+            dot.widthAnchor.constraint(equalToConstant: 8),
+            dot.heightAnchor.constraint(equalToConstant: 8),
+        ])
+    }
+
+    private weak var stack: NSStackView?
+
+    required init?(coder: NSCoder) { fatalError("not implemented") }
+
+    /// The tooltip must never take the mouse: it sits under the cursor by
+    /// construction, and swallowing moves would make it flicker itself away.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func show(_ hit: ChartHit) {
+        dot.layer?.backgroundColor = hit.color.cgColor
+        nameLabel.stringValue = hit.series.label
+        valueLabel.stringValue = Self.format(hit)
+        timeLabel.stringValue = Self.timeFormatter.string(from: hit.time)
+        guard let stack else { return }
+        let content = stack.fittingSize
+        setFrameSize(NSSize(width: content.width + 2 * Self.inset,
+                            height: content.height + 2 * Self.inset))
+        needsDisplay = true
+    }
+
+    private static func format(_ hit: ChartHit) -> String {
+        switch hit.unit {
+        case .percent:
+            return String(format: "%.1f%%", hit.value)
+        case .bytesPerSecond:
+            return "\(bytesFormatter.string(fromByteCount: Int64(hit.value)))/s"
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                xRadius: 6, yRadius: 6)
+        NSColor.controlBackgroundColor.setFill()
+        path.fill()
+        NSColor.separatorColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 }
 
@@ -112,9 +356,38 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
                                    NSToolbarDelegate, NSMenuDelegate {
     let chartView: ChartView
     let processList = ProcessListView()
+    let connectionList = ConnectionListView(showProcess: true, defaultsKey: "all")
+
+    /// What the segmented control's index means. The process categories keep
+    /// their own enum; this one is about window chrome.
+    enum Pane: Equatable {
+        case chart
+        case process(ProcessListView.Tab)
+        case connections
+
+        init(index: Int) {
+            switch index {
+            case 0: self = .chart
+            case ConnectionsIndex.value: self = .connections
+            default: self = ProcessListView.Tab(rawValue: index - 1).map(Pane.process) ?? .chart
+            }
+        }
+
+        var isProcess: Bool { if case .process = self { return true }; return false }
+        /// Search filters both lists; Quit/Inspect act on a selected process.
+        var hasSearch: Bool { self != .chart }
+        /// Quit / Inspect need a process to act on: a process row, or the
+        /// process owning a selected connection.
+        var hasProcessActions: Bool { self != .chart }
+    }
+
+    /// Last segment; kept in one place so the index arithmetic has a name.
+    enum ConnectionsIndex { static let value = 6 }
+
+    private(set) var pane: Pane = .chart
     private let tabs = RightClickableTabView()
     private let selector = NSSegmentedControl(
-        labels: ["Chart", "CPU", "Memory", "Energy", "Disk", "Network"],
+        labels: ["Chart", "CPU", "Memory", "Energy", "Disk", "Network", "Connections"],
         trackingMode: .selectOne, target: nil, action: nil)
     private weak var renderer: HistoryRenderer?
     private let hasBattery: Bool
@@ -209,6 +482,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
                  memory: Double, diskRead: Double, diskWrite: Double,
                  netRx: Double = 0, netTx: Double = 0, swapUsed: Double = 0) {
         chartView.needsDisplay = true
+        chartView.syncHoverFromCursor()   // also releases a stuck hover freeze
         updateChips(cpu: cpu, gpu: gpu, battery: battery,
                     memory: memory, diskRead: diskRead, diskWrite: diskWrite,
                     netRx: netRx, netTx: netTx, swapUsed: swapUsed)
@@ -238,7 +512,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         chartView.layer?.cornerRadius = 10
         chartView.layer?.masksToBounds = true
         chartView.layer?.borderWidth = 0.5
-        chartView.layer?.borderColor = NSColor.separatorColor.cgColor
+        chartView.applyBorderColor()
 
         for l in leftLabels  { bg.addSubview(l) }
         for l in rightLabels { bg.addSubview(l) }
@@ -388,9 +662,20 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         ])
         procTab.view = procContainer
 
+        connectionList.onInspect = { [weak self] pid in
+            self?.processList.openInspector(pid: pid)
+        }
+        connectionList.onQuit = { [weak self] pid in self?.processList.quit(pid: pid) }
+        connectionList.onForceQuit = { [weak self] pid in
+            self?.processList.forceQuit(pid: pid)
+        }
+        let connTab = NSTabViewItem(identifier: "connections")
+        connTab.view = connectionList
+
         tabs.tabViewType = .noTabsNoBorder
         tabs.addTabViewItem(chartTab)
         tabs.addTabViewItem(procTab)
+        tabs.addTabViewItem(connTab)
         tabs.translatesAutoresizingMaskIntoConstraints = false
 
         // Lives in the unified toolbar (centered), not in the content.
@@ -427,20 +712,20 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     func toolbar(_ toolbar: NSToolbar,
                  itemForItemIdentifier id: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        let onProcess = selector.selectedSegment > 0
+        let onProcess = Pane(index: selector.selectedSegment).hasProcessActions
         switch id {
         case .quitProcess:
             let item = NSToolbarItem(itemIdentifier: id)
             item.image = NSImage(systemSymbolName: "xmark.circle",
                                  accessibilityDescription: "Quit selected process")
             item.label = "Quit"
-            item.toolTip = "Quit the selected process"
+            item.toolTip = "Quit the selected process"   // or the connection's owner
             item.isBordered = true
             item.autovalidates = false
             item.isEnabled = onProcess
             if #available(macOS 15.0, *) { item.isHidden = !onProcess }
-            item.target = processList
-            item.action = #selector(ProcessListView.quitSelected)
+            item.target = self
+            item.action = #selector(quitFromToolbar(_:))
             quitItem = item
             return item
         case .inspect:
@@ -453,8 +738,8 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             item.autovalidates = false
             item.isEnabled = onProcess
             if #available(macOS 15.0, *) { item.isHidden = !onProcess }
-            item.target = processList
-            item.action = #selector(ProcessListView.inspectSelected)
+            item.target = self
+            item.action = #selector(inspectFromToolbar(_:))
             inspectItem = item
             return item
         case .actions:
@@ -479,7 +764,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             item.preferredWidthForSearchField = 180
             item.resignsFirstResponderWithCancel = true
             item.searchField.placeholderString = "Search"
-            item.searchField.isEnabled = onProcess
+            item.searchField.isEnabled = Pane(index: selector.selectedSegment).hasSearch
             item.searchField.target = self
             item.searchField.action = #selector(searchChanged(_:))
             searchItem = item
@@ -507,8 +792,48 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
+    /// Toolbar Quit / Inspect: same buttons, whichever list is showing.
+    @objc private func quitFromToolbar(_ sender: Any?) {
+        switch pane {
+        case .connections:
+            guard let pid = connectionList.selectedPID else { NSSound.beep(); return }
+            processList.quit(pid: pid)
+        default:
+            processList.quitSelected()
+        }
+    }
+
+    @objc private func inspectFromToolbar(_ sender: Any?) {
+        switch pane {
+        case .connections:
+            guard let pid = connectionList.selectedPID else { NSSound.beep(); return }
+            processList.openInspector(pid: pid)
+        default:
+            processList.inspectSelected()
+        }
+    }
+
+    @objc private func forceQuitFromMenu(_ sender: Any?) {
+        switch pane {
+        case .connections:
+            guard let pid = connectionList.selectedPID else { NSSound.beep(); return }
+            processList.forceQuit(pid: pid)
+        default:
+            processList.forceQuitSelected()
+        }
+    }
+
+    @objc private func toggleHostNameResolution(_ sender: NSMenuItem) {
+        ConnectionListView.resolvesHostNames.toggle()
+        connectionList.hostNameDisplayChanged()
+    }
+
     @objc private func searchChanged(_ sender: NSSearchField) {
-        processList.setSearch(sender.stringValue)
+        // One field, whichever list is showing.
+        switch pane {
+        case .connections: connectionList.setFilter(sender.stringValue)
+        default:           processList.setSearch(sender.stringValue)
+        }
     }
 
     // NSMenuDelegate — rebuild the "…" menu on open so the interval checkmark
@@ -516,7 +841,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === actionsItem?.menu else { return }
         menu.removeAllItems()
-        let onProcess = selector.selectedSegment > 0
+        let onProcess = pane.isProcess
 
         // The toolbar's menu button is pull-down-style: it consumes the first
         // item as its own face, so give it a hidden placeholder to eat.
@@ -572,18 +897,29 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         hist.submenu = histMenu
         menu.addItem(hist)
 
+        if pane == .connections {
+            let resolve = NSMenuItem(title: "Resolve Host Names",
+                                     action: #selector(toggleHostNameResolution(_:)),
+                                     keyEquivalent: "")
+            resolve.target = self
+            resolve.state = ConnectionListView.resolvesHostNames ? .on : .off
+            menu.addItem(resolve)
+        }
+
         let cols = NSMenuItem(title: "Columns", action: nil, keyEquivalent: "")
-        cols.submenu = processList.columnSelectorMenu()
-        cols.isEnabled = onProcess
+        cols.submenu = pane == .connections
+            ? connectionList.columnSelectorMenu()
+            : processList.columnSelectorMenu()
+        cols.isEnabled = onProcess || pane == .connections
         menu.addItem(cols)
 
         // Destructive action last.
         menu.addItem(.separator())
         let force = NSMenuItem(title: "Force Quit Process…",
-                               action: #selector(ProcessListView.forceQuitSelected),
+                               action: #selector(forceQuitFromMenu(_:)),
                                keyEquivalent: "")
-        force.target = processList
-        force.isEnabled = onProcess
+        force.target = self
+        force.isEnabled = pane.hasProcessActions
         menu.addItem(force)
     }
 
@@ -602,36 +938,51 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     // Menu-driven selection (⌘1 / ⌘2 from the app's Window menu).
     @objc func selectChartTab(_ sender: Any?)     { applySelection(0) }   // Chart
     @objc func selectProcessesTab(_ sender: Any?) { applySelection(1) }   // CPU category
+    @objc func selectConnectionsTab(_ sender: Any?) { applySelection(ConnectionsIndex.value) }
 
     @objc private func selectorChanged(_ s: NSSegmentedControl) {
         applySelection(s.selectedSegment)
     }
 
-    /// 0 = Chart; 1…4 = process categories (CPU/Memory/Energy/Disk).
+    /// 0 = Chart; 1…5 = process categories; 6 = Connections.
     private func applySelection(_ index: Int) {
         let i = max(0, index)
         selector.selectedSegment = i
-        let onProcess = i > 0
-        if onProcess {
-            tabs.selectTabViewItem(at: 1)
-            if let t = ProcessListView.Tab(rawValue: i - 1) { processList.showCategory(t) }
-        } else {
+        pane = Pane(index: i)
+        switch pane {
+        case .chart:
             tabs.selectTabViewItem(at: 0)
+        case .process(let t):
+            tabs.selectTabViewItem(at: 1)
+            processList.showCategory(t)
+        case .connections:
+            tabs.selectTabViewItem(at: 2)
         }
         // AM-style subtitle under the window title on the process tabs.
-        window?.subtitle = onProcess ? processList.scope.label : ""
-        // Process-only toolbar items hide on the Chart tab (macOS 15+;
-        // merely disabled on 14, where NSToolbarItem.isHidden doesn't exist).
-        quitItem?.isEnabled = onProcess
-        inspectItem?.isEnabled = onProcess
+        window?.subtitle = pane.isProcess ? processList.scope.label : ""
+        // Process-only toolbar items hide elsewhere (macOS 15+; merely disabled
+        // on 14, where NSToolbarItem.isHidden doesn't exist).
+        let actions = pane.hasProcessActions
+        quitItem?.isEnabled = actions
+        inspectItem?.isEnabled = actions
         if #available(macOS 15.0, *) {
-            quitItem?.isHidden = !onProcess
-            inspectItem?.isHidden = !onProcess
+            quitItem?.isHidden = !actions
+            inspectItem?.isHidden = !actions
         }
         if let search = searchItem {
-            search.searchField.isEnabled = onProcess
-            if !onProcess { search.endSearchInteraction() }
+            search.searchField.isEnabled = pane.hasSearch
+            if !pane.hasSearch { search.endSearchInteraction() }
         }
+    }
+
+    /// Feed the system-wide connections view; names come from the process list
+    /// so the netstat column's 16-character truncation doesn't show.
+    func setConnections(_ rows: [Connection], processNames: [pid_t: ProcessOwner]) {
+        connectionList.setConnections(rows, processNames: processNames)
+    }
+
+    var isConnectionsPaneVisible: Bool {
+        pane == .connections && (window?.isVisible ?? false)
     }
 
     private static func axisLabel(_ s: String, alignment: NSTextAlignment) -> NSTextField {
@@ -699,18 +1050,24 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
     private func applyCurrentColors() {
         guard let c = renderer?.colors else { return }
-        pSysChip.setColor(c.pSys)
-        eSysChip.setColor(c.eSys)
-        pUserChip.setColor(c.pUser)
-        eUserChip.setColor(c.eUser)
-        gpuChip.setColor(c.gpu)
-        memoryChip.setColor(c.memory)
-        swapChip.setColor(c.swap)
-        batteryChip?.setColor(c.battery)
-        readChip.setColor(c.diskRead)
-        writeChip.setColor(c.diskWrite)
-        netRxChip.setColor(c.netRx)
-        netTxChip.setColor(c.netTx)
+        // The dots must match the lines, which are appearance-adjusted; the
+        // layer-backed dots hold static CGColors, so this runs every refresh.
+        let light = (window?.effectiveAppearance ?? NSApp.effectiveAppearance).isLight
+        func dot(_ chip: LegendChip?, _ color: NSColor) {
+            chip?.setColor(color.onSurface(light: light))
+        }
+        dot(pSysChip, c.pSys)
+        dot(eSysChip, c.eSys)
+        dot(pUserChip, c.pUser)
+        dot(eUserChip, c.eUser)
+        dot(gpuChip, c.gpu)
+        dot(memoryChip, c.memory)
+        dot(swapChip, c.swap)
+        dot(batteryChip, c.battery)
+        dot(readChip, c.diskRead)
+        dot(writeChip, c.diskWrite)
+        dot(netRxChip, c.netRx)
+        dot(netTxChip, c.netTx)
     }
 
     private func updateRightAxis() {

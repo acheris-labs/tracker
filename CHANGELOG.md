@@ -11,6 +11,53 @@ auto-update prompt.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-12
+
+### Added
+- **Connections tab.** A new top-level tab listing every connection on the
+  machine — process name (with its icon) and PID, protocol, local port, remote
+  host, remote port, TCP state, and bytes received/sent per connection. It
+  reads `netstat -anv`, so unlike the per-process view it isn't limited to
+  processes you own: root-owned daemons appear too, with their owning user.
+  Sortable on every column and filtered by the toolbar's search field.
+  Double-click a row to inspect its process; the Quit / Inspect toolbar
+  buttons and Force Quit act on the selected connection's process (individual
+  connections can't be closed without root or a network extension). "…" ›
+  Resolve Host Names switches the Remote Host column between reverse-DNS
+  names and raw addresses.
+- **Connections tab in the per-process inspector.** Every TCP/UDP socket the
+  process holds: protocol, local port, remote host, remote port and TCP state,
+  sortable, refreshed on the existing tick. Remote addresses are resolved to
+  their reverse-DNS names in the background where they have one (many don't —
+  Apple, Cloudflare and Fastly ranges typically have no PTR), falling back to
+  the raw IP; the full name, address and local endpoint are on the row's
+  tooltip. Processes belonging to another user say so rather than showing an
+  empty list — their sockets aren't readable without root, though the panel now
+  falls back to netstat for those, so it shows the same rows the top-level tab
+  does.
+- **Chart hover readouts.** Hovering a line (or a CPU band) in the Chart view
+  spotlights it and shows a small panel with the series, its value at that
+  moment, and the time it was sampled. Hovering empty space shows nothing —
+  the readout is always for one specific trace. The chart holds still while
+  the pointer is over it (marked "Paused") so the sample you're aiming at
+  doesn't scroll away, and resumes when you leave.
+- **Light mode.** Preferences gains an Appearance control — Auto (default,
+  follows System Settings live), Light, or Dark — and the whole app honors
+  it, chart included. On a light card the chart palette is adjusted for
+  legibility (brightness capped, saturation nudged) so near-white and pale
+  traces like Memory and Network stay readable; custom colors get the same
+  treatment. The dock icon keeps following System Settings rather than the
+  app's override, since it's drawn on the Dock's own material.
+
+### Fixed
+- **Other users' processes now show their real name and icon** in the process
+  tabs. Their name came from the kernel's 16-character `p_comm` field with no
+  executable path, so long names were cut ("AddressBookSourceSy…") and every
+  one of them drew a generic icon; both now come from the executable path,
+  which is readable for any process.
+- Footer panes and the chart card kept their borders from the appearance they
+  were created in, so the outlines disappeared after an appearance switch.
+
 ## [0.3.0] - 2026-08-12
 
 ### Added
@@ -177,7 +224,8 @@ auto-update prompt.
 - Keyboard shortcuts (⌘0 chart, ⌘, preferences, ⌘W close, ⌘H hide, ⌘Q quit).
 - CI build workflow and a tag-driven release workflow.
 
-[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/acheris-labs/tracker/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/acheris-labs/tracker/compare/v0.2.8...v0.3.0
 [0.2.8]: https://github.com/acheris-labs/tracker/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/acheris-labs/tracker/compare/v0.2.6...v0.2.7

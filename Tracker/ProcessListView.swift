@@ -134,7 +134,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private static let tabKey = "ProcessTab"
 
     /// Process icons, cached by executable path (an icon never changes for a path).
-    private var iconCache: [String: NSImage] = [:]
+    private static var iconCache: [String: NSImage] = [:]
 
     static let bytesFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -759,23 +759,40 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     @objc func quitSelected() {
         guard let r = selectedRowIndex() else { NSSound.beep(); return }
-        sendSignal(SIGTERM, to: rows[r].pid)
+        quit(pid: rows[r].pid)
     }
 
-    @objc func forceQuitSelected() {
-        guard let r = selectedRowIndex() else { NSSound.beep(); return }
-        let snap = rows[r]
+    /// Same actions, addressed by pid — the Connections tab selects a
+    /// connection, not a process row.
+    func quit(pid: pid_t) {
+        sendSignal(SIGTERM, to: pid)
+    }
+
+    func forceQuit(pid: pid_t) {
+        let name = allRows.first(where: { $0.pid == pid })?.name ?? "\(pid)"
         let a = NSAlert()
-        a.messageText = "Force Quit “\(snap.name)” (\(snap.pid))?"
+        a.messageText = "Force Quit “\(name)” (\(pid))?"
         a.informativeText = "Force Quit skips normal cleanup. Unsaved work will be lost."
         a.alertStyle = .warning
         a.addButton(withTitle: "Force Quit")
         a.addButton(withTitle: "Cancel")
-        if a.runModal() == .alertFirstButtonReturn { sendSignal(SIGKILL, to: snap.pid) }
+        if a.runModal() == .alertFirstButtonReturn { sendSignal(SIGKILL, to: pid) }
+    }
+
+    @objc func forceQuitSelected() {
+        guard let r = selectedRowIndex() else { NSSound.beep(); return }
+        forceQuit(pid: rows[r].pid)
     }
 
     /// Live inspector panels, one per pid; updated from setSnapshots.
     private var inspectors: [pid_t: InspectorPanelController] = [:]
+
+    /// Open the inspector for a pid the caller found elsewhere (the
+    /// Connections tab). No-op if the process has since exited.
+    func openInspector(pid: pid_t) {
+        guard let snap = allRows.first(where: { $0.pid == pid }) else { NSSound.beep(); return }
+        openInspector(for: snap)
+    }
 
     @objc func inspectSelected() {
         guard let r = selectedRowIndex() else { NSSound.beep(); return }
@@ -793,7 +810,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
             return
         }
         let panel = InspectorPanelController(snapshot: snap,
-                                             icon: icon(forExecPath: snap.execPath))
+                                             icon: Self.icon(forExecPath: snap.execPath))
         panel.onClose = { [weak self] in self?.inspectors[snap.pid] = nil }
         // Cascade additional panels so they don't restore exactly on top of
         // one another (they share a frame-autosave name).
@@ -868,7 +885,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         if id == "name" {
             let cell = (table.makeView(withIdentifier: col.identifier, owner: self)
                         as? NSTableCellView) ?? Self.makeNameCell(identifier: col.identifier)
-            cell.imageView?.image = icon(forExecPath: snap.execPath)
+            cell.imageView?.image = Self.icon(forExecPath: snap.execPath)
             cell.textField?.stringValue = snap.name
             return cell
         }
@@ -917,9 +934,10 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     // MARK: helpers
 
-    private static func makeTextCell(identifier: NSUserInterfaceItemIdentifier,
-                                     monospaced: Bool,
-                                     alignment: NSTextAlignment) -> NSTableCellView {
+    /// Shared with ConnectionListView so both tables' rows are identical.
+    static func makeTextCell(identifier: NSUserInterfaceItemIdentifier,
+                             monospaced: Bool,
+                             alignment: NSTextAlignment) -> NSTableCellView {
         let cell = NSTableCellView()
         cell.identifier = identifier
         let label = NSTextField(labelWithString: "")
@@ -940,8 +958,9 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         return cell
     }
 
-    /// Name column: process icon + truncating name label.
-    private static func makeNameCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
+    /// Name column: process icon + truncating name label. Shared with
+    /// ConnectionListView so its Process Name column matches.
+    static func makeNameCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
         let cell = NSTableCellView()
         cell.identifier = identifier
         let iv = NSImageView()
@@ -970,7 +989,8 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     /// Resolve a process's icon from its executable path, cached. App bundles
     /// get the app icon; pathless system processes get the generic exec icon.
-    private func icon(forExecPath p: String) -> NSImage {
+    /// Static so any view can share one cache — icon lookups hit the disk.
+    static func icon(forExecPath p: String) -> NSImage {
         let key = p.isEmpty ? "<none>" : p
         if let c = iconCache[key] { return c }
         let base: NSImage

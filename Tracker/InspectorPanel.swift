@@ -56,14 +56,22 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
     private let memoryGrid: InspectorForm
     private let statsGrid: InspectorForm
     private let segment = NSSegmentedControl(
-        labels: ["Memory", "Statistics", "Open Files & Ports"],
+        labels: ["Memory", "Statistics", "Open Files & Ports", "Connections"],
         trackingMode: .selectOne, target: nil, action: nil)
     private let tabs = NSTabView()
     private let filesText = NSTextView()
-    private let filesQueue = DispatchQueue(label: "net.acheris.tracker.inspector",
-                                           qos: .userInitiated)
+    private let connections = ConnectionListView(showProcess: false,
+                                                 defaultsKey: "inspector")
+    private let workQueue = DispatchQueue(label: "net.acheris.tracker.inspector",
+                                          qos: .userInitiated)
     private var filesRefreshInFlight = false
+    private var connectionsRefreshInFlight = false
     private var exited = false
+
+    /// Tab order; the segmented control's index is the raw value.
+    private enum Pane: Int {
+        case memory, statistics, files, connections
+    }
 
     // Row orders; setValue indexes must match.
     private enum TopRow: Int, CaseIterable {
@@ -116,16 +124,16 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
         statsGrid = grid(StatRow.allCases.map(\.label))
 
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false)
         win.title = snapshot.name
         win.subtitle = "PID \(snapshot.pid)"
         win.isReleasedWhenClosed = false
-        win.minSize = NSSize(width: 420, height: 420)
+        win.minSize = NSSize(width: 520, height: 460)
         super.init(window: win)
         shouldCascadeWindows = false          // would defeat the autosave name
-        windowFrameAutosaveName = "InspectorPanel"
+        windowFrameAutosaveName = "InspectorPanel2"
         win.delegate = self
         buildContent(window: win, snapshot: snapshot, icon: icon)
         win.center()
@@ -164,6 +172,9 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
         pathValue.textColor = .secondaryLabelColor
         pathValue.lineBreakMode = .byTruncatingMiddle
         pathValue.isSelectable = true
+        // Otherwise a deep path (browser helpers run 200 characters) forces the
+        // whole window wider instead of truncating.
+        pathValue.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         pathValue.stringValue = snapshot.execPath.isEmpty ? "—" : snapshot.execPath
         let pathRow = NSStackView(views: [pathTitle, pathValue])
         pathRow.orientation = .horizontal
@@ -213,7 +224,7 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
         filesScroll.documentView = filesText
 
         for (id, view) in [("memory", memoryWrap), ("stats", statsWrap),
-                           ("files", filesScroll)] {
+                           ("files", filesScroll), ("connections", connections)] {
             let item = NSTabViewItem(identifier: id)
             item.view = view
             tabs.addTabViewItem(item)
@@ -223,6 +234,9 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
         tabs.translatesAutoresizingMaskIntoConstraints = false
 
         let box = FooterPane(content: tabs, minWidth: 0, height: nil)
+        // The connections table has no intrinsic height of its own; without a
+        // floor the box would collapse on that tab.
+        box.heightAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
 
         // Quit button, bottom-left like AM's inspector.
         let quit = NSButton(title: "Quit", target: self, action: #selector(quitProcess(_:)))
@@ -268,7 +282,16 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
 
     @objc private func segmentChanged(_ s: NSSegmentedControl) {
         tabs.selectTabViewItem(at: s.selectedSegment)
-        if s.selectedSegment == 2 { refreshOpenFiles() }
+        refreshSelectedPane()
+    }
+
+    /// Only the pane on screen pays for its data.
+    private func refreshSelectedPane() {
+        switch Pane(rawValue: segment.selectedSegment) {
+        case .files:       refreshOpenFiles()
+        case .connections: refreshConnections()
+        default:           break
+        }
     }
 
     @objc private func quitProcess(_ sender: Any?) {
@@ -311,16 +334,14 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
         statsGrid.setValue("\(F.formatTotal(snap.netRxTotal)) / \(F.formatTotal(snap.netTxTotal))",
                            at: StatRow.netTotal.rawValue)
 
-        if segment.selectedSegment == 2 { refreshOpenFiles() }
+        refreshSelectedPane()
     }
-
-    // MARK: open files (libproc)
 
     private func refreshOpenFiles() {
         guard !exited, !filesRefreshInFlight else { return }
         filesRefreshInFlight = true
         let pid = self.pid
-        filesQueue.async { [weak self] in
+        workQueue.async { [weak self] in
             let listing = Self.openFilesListing(pid: pid)
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -330,18 +351,38 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    // MARK: connections
+
+    private func refreshConnections() {
+        guard !exited, !connectionsRefreshInFlight else { return }
+        connectionsRefreshInFlight = true
+        let pid = self.pid
+        workQueue.async { [weak self] in
+            // libproc can only read our own processes' descriptors; for the
+            // rest, netstat sees the same sockets from the outside (it's a
+            // subprocess, so it's the fallback rather than the default).
+            let rows: [Connection]
+            switch ConnectionSampler.connections(pid: pid) {
+            case .ok(let own):  rows = own
+            case .notPermitted: rows = SystemConnectionSampler.sample().filter { $0.pid == pid }
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.connectionsRefreshInFlight = false
+                self.connections.setConnections(rows)
+            }
+        }
+    }
+
+    // MARK: open files (libproc)
+
     /// Enumerate the process's file descriptors: vnode paths in full, sockets
     /// and other descriptor kinds summarized.
     private static func openFilesListing(pid: pid_t) -> String {
-        let bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
-        guard bytes > 0 else { return "No descriptor info available." }
-        let capacity = Int(bytes) / MemoryLayout<proc_fdinfo>.size
-        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: capacity)
-        let used = fds.withUnsafeMutableBytes {
-            proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, bytes)
+        guard let fds = ConnectionSampler.fdList(pid: pid) else {
+            return "No descriptor info available."
         }
-        guard used > 0 else { return "No descriptor info available." }
-        let count = min(capacity, Int(used) / MemoryLayout<proc_fdinfo>.size)
+        let count = fds.count
 
         var paths: [String] = []
         var sockets: [String: Int] = [:]   // kind → count
