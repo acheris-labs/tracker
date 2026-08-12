@@ -305,3 +305,63 @@ jobs:
               git push origin gh-pages
             fi
           )
+
+  # Regenerate the cask in acheris-labs/homebrew-tools from the notarized DMG.
+  # The default GITHUB_TOKEN cannot write to another repository, so this pushes
+  # over SSH with a deploy key whose write access is scoped to the tap and
+  # nothing else. Homebrew installs the app; Sparkle keeps updating it in place
+  # (see the auto_updates stanza in the template).
+  brew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: v
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update cask
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          # Without the deploy key the release itself is still fine - the cask
+          # just has to be pushed by hand. Warn rather than fail the run.
+          if [ -z "${TAP_SSH_KEY:-}" ]; then
+            echo "::warning::HOMEBREW_TAP_SSH_KEY not set; skipping cask update"
+            exit 0
+          fi
+
+          export VERSION="${{ steps.v.outputs.version }}"
+          DMG="Tracker-${VERSION}.dmg"
+          # The release publishes no sha256 sidecar, so hash the DMG we just
+          # shipped rather than adding an artifact only Homebrew would read.
+          gh release download "${{ steps.v.outputs.tag }}" --pattern "$DMG" --dir .
+          export SHA_DMG="$(shasum -a 256 "$DMG" | cut -d' ' -f1)"
+          test -n "$SHA_DMG" || { echo "could not hash $DMG"; exit 1; }
+          envsubst < packaging/tracker-cask.rb.tmpl > tracker.rb
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_SSH_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes"
+
+          git clone git@github.com:acheris-labs/homebrew-tools.git tap
+          mkdir -p tap/Casks
+          cp tracker.rb tap/Casks/tracker.rb
+          cd tap
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add Casks/tracker.rb
+          if git diff --cached --quiet; then
+            echo "cask unchanged; nothing to push"
+          else
+            git commit -m "chore: update tracker cask to ${{ steps.v.outputs.tag }}"
+            git push
+          fi
