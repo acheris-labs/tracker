@@ -1,5 +1,13 @@
 import AppKit
 
+extension NSToolbarItem.Identifier {
+    static let quitProcess = NSToolbarItem.Identifier("QuitProcess")
+    static let inspect     = NSToolbarItem.Identifier("Inspect")
+    static let actions     = NSToolbarItem.Identifier("Actions")
+    static let tabSelector = NSToolbarItem.Identifier("TabSelector")
+    static let search      = NSToolbarItem.Identifier("Search")
+}
+
 // MARK: - Tab view with per-tab right-click menus
 
 final class RightClickableTabView: NSTabView {
@@ -29,8 +37,9 @@ final class ChartView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         // The blown-up chart uses smoothed splines / stacked areas; the dock
-        // icon keeps the crisp bars (renderer.render()).
-        renderer?.draw(in: bounds, smoothed: true)
+        // icon keeps the crisp bars (renderer.render()). The card's background
+        // is the system text background so it matches the process tables.
+        renderer?.draw(in: bounds, smoothed: true, background: .textBackgroundColor)
     }
 }
 
@@ -82,15 +91,22 @@ final class LegendChip: NSView {
 
 // MARK: - Window
 
-final class ChartWindowController: NSWindowController, NSWindowDelegate {
+final class ChartWindowController: NSWindowController, NSWindowDelegate,
+                                   NSToolbarDelegate, NSMenuDelegate {
     let chartView: ChartView
     let processList = ProcessListView()
     private let tabs = RightClickableTabView()
     private let selector = NSSegmentedControl(
-        labels: ["Chart", "CPU", "Memory", "Energy", "Disk"],
+        labels: ["Chart", "CPU", "Memory", "Energy", "Disk", "Network"],
         trackingMode: .selectOne, target: nil, action: nil)
     private weak var renderer: HistoryRenderer?
     private let hasBattery: Bool
+
+    // Toolbar items, kept so applySelection can enable/disable them per tab.
+    private var quitItem: NSToolbarItem?
+    private var inspectItem: NSToolbarItem?
+    private var actionsItem: NSMenuToolbarItem?
+    private var searchItem: NSSearchToolbarItem?
 
     private var leftLabels: [NSTextField] = []
     private var rightLabels: [NSTextField] = []
@@ -131,13 +147,28 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
         win.titleVisibility = .visible
         win.isReleasedWhenClosed = false
         win.isRestorable = false
-        win.isMovableByWindowBackground = true
+        // Off: the edge-to-edge process table would fight drags; the titlebar
+        // remains the drag handle, as in Activity Monitor.
+        win.isMovableByWindowBackground = false
         win.minSize = NSSize(width: 800, height: 360)
         win.center()
 
         super.init(window: win)
         win.delegate = self
         buildContent(window: win)
+        buildToolbar(window: win)
+    }
+
+    /// Activity-Monitor-style unified toolbar: quit/inspect/… at the leading
+    /// edge next to the title, the tab selector centered, search trailing.
+    private func buildToolbar(window win: NSWindow) {
+        let toolbar = NSToolbar(identifier: "TrackerMain")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        toolbar.centeredItemIdentifiers = [.tabSelector]
+        win.toolbarStyle = .unified
+        win.toolbar = toolbar
     }
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
@@ -154,15 +185,10 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
     // MARK: Layout
 
     private func buildContent(window: NSWindow) {
-        // Dark rounded panel matching the process tabs' container, so switching
-        // between Chart and the category tabs feels consistent.
+        // Transparent panel — the window background shows through, matching
+        // the process tabs' system-standard look. The chart card itself keeps
+        // its rounded border and draws a system background.
         let bg = NSView()
-        bg.wantsLayer = true
-        bg.layer?.backgroundColor = NSColor(white: 0.04, alpha: 1).cgColor
-        bg.layer?.cornerRadius = 10
-        bg.layer?.masksToBounds = true
-        bg.layer?.borderWidth = 0.5
-        bg.layer?.borderColor = NSColor.separatorColor.cgColor
 
         // Axis labels
         for s in ["100%", "50%", "0%"] {
@@ -284,15 +310,16 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
         ])
         chartTab.view = chartContainer
 
+        // Process tabs run edge to edge, like Activity Monitor.
         let procTab = NSTabViewItem(identifier: "processes")
         processList.translatesAutoresizingMaskIntoConstraints = false
         let procContainer = NSView()
         procContainer.addSubview(processList)
         NSLayoutConstraint.activate([
-            processList.topAnchor.constraint(equalTo: procContainer.topAnchor, constant: 4),
-            processList.bottomAnchor.constraint(equalTo: procContainer.bottomAnchor, constant: -4),
-            processList.leadingAnchor.constraint(equalTo: procContainer.leadingAnchor, constant: 4),
-            processList.trailingAnchor.constraint(equalTo: procContainer.trailingAnchor, constant: -4),
+            processList.topAnchor.constraint(equalTo: procContainer.topAnchor),
+            processList.bottomAnchor.constraint(equalTo: procContainer.bottomAnchor),
+            processList.leadingAnchor.constraint(equalTo: procContainer.leadingAnchor),
+            processList.trailingAnchor.constraint(equalTo: procContainer.trailingAnchor),
         ])
         procTab.view = procContainer
 
@@ -301,18 +328,15 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
         tabs.addTabViewItem(procTab)
         tabs.translatesAutoresizingMaskIntoConstraints = false
 
-        selector.segmentStyle = .texturedRounded
+        // Lives in the unified toolbar (centered), not in the content.
+        selector.segmentStyle = .automatic
         selector.target = self
         selector.action = #selector(selectorChanged(_:))
-        selector.translatesAutoresizingMaskIntoConstraints = false
 
         let root = NSView()
-        root.addSubview(selector)
         root.addSubview(tabs)
         NSLayoutConstraint.activate([
-            selector.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
-            selector.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            tabs.topAnchor.constraint(equalTo: selector.bottomAnchor, constant: 6),
+            tabs.topAnchor.constraint(equalTo: root.topAnchor),
             tabs.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             tabs.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             tabs.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -322,6 +346,151 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
 
         applyCurrentColors()
         updateRightAxis()
+    }
+
+    // MARK: NSToolbarDelegate
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.quitProcess, .inspect, .actions, .flexibleSpace, .tabSelector,
+         .flexibleSpace, .search]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    func toolbar(_ toolbar: NSToolbar,
+                 itemForItemIdentifier id: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        let onProcess = selector.selectedSegment > 0
+        switch id {
+        case .quitProcess:
+            let item = NSToolbarItem(itemIdentifier: id)
+            item.image = NSImage(systemSymbolName: "xmark.circle",
+                                 accessibilityDescription: "Quit selected process")
+            item.label = "Quit"
+            item.toolTip = "Quit the selected process"
+            item.isBordered = true
+            item.autovalidates = false
+            item.isEnabled = onProcess
+            if #available(macOS 15.0, *) { item.isHidden = !onProcess }
+            item.target = processList
+            item.action = #selector(ProcessListView.quitSelected)
+            quitItem = item
+            return item
+        case .inspect:
+            let item = NSToolbarItem(itemIdentifier: id)
+            item.image = NSImage(systemSymbolName: "info.circle",
+                                 accessibilityDescription: "Inspect selected process")
+            item.label = "Inspect"
+            item.toolTip = "Inspect the selected process"
+            item.isBordered = true
+            item.autovalidates = false
+            item.isEnabled = onProcess
+            if #available(macOS 15.0, *) { item.isHidden = !onProcess }
+            item.target = processList
+            item.action = #selector(ProcessListView.inspectSelected)
+            inspectItem = item
+            return item
+        case .actions:
+            let item = NSMenuToolbarItem(itemIdentifier: id)
+            item.image = NSImage(systemSymbolName: "ellipsis.circle",
+                                 accessibilityDescription: "Actions")
+            item.label = "Actions"
+            item.autovalidates = false
+            let menu = NSMenu()
+            menu.delegate = self
+            menu.autoenablesItems = false
+            item.menu = menu
+            actionsItem = item
+            return item
+        case .tabSelector:
+            let item = NSToolbarItem(itemIdentifier: id)
+            item.view = selector
+            item.label = "View"
+            return item
+        case .search:
+            let item = NSSearchToolbarItem(itemIdentifier: id)
+            item.preferredWidthForSearchField = 180
+            item.resignsFirstResponderWithCancel = true
+            item.searchField.placeholderString = "Search"
+            item.searchField.isEnabled = onProcess
+            item.searchField.target = self
+            item.searchField.action = #selector(searchChanged(_:))
+            searchItem = item
+            return item
+        default:
+            return nil
+        }
+    }
+
+    /// The toolbar inserts a copy of the item the delegate returns, so wiring
+    /// done in itemForItemIdentifier can end up on the wrong instance — this
+    /// notification hands us the item actually going into the toolbar.
+    func toolbarWillAddItem(_ notification: Notification) {
+        guard let item = notification.userInfo?["item"] as? NSToolbarItem else { return }
+        switch item.itemIdentifier {
+        case .search:
+            guard let s = item as? NSSearchToolbarItem else { return }
+            s.searchField.target = self
+            s.searchField.action = #selector(searchChanged(_:))
+            searchItem = s
+        case .quitProcess: quitItem = item
+        case .inspect:     inspectItem = item
+        case .actions:     actionsItem = item as? NSMenuToolbarItem
+        default: break
+        }
+    }
+
+    @objc private func searchChanged(_ sender: NSSearchField) {
+        processList.setSearch(sender.stringValue)
+    }
+
+    // NSMenuDelegate — rebuild the "…" menu on open so the interval checkmark
+    // and column toggles always reflect current state.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === actionsItem?.menu else { return }
+        menu.removeAllItems()
+        let onProcess = selector.selectedSegment > 0
+
+        // The toolbar's menu button is pull-down-style: it consumes the first
+        // item as its own face, so give it a hidden placeholder to eat.
+        let placeholder = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        placeholder.isHidden = true
+        menu.addItem(placeholder)
+
+        let freq = NSMenuItem(title: "Update Frequency", action: nil, keyEquivalent: "")
+        let freqMenu = NSMenu()
+        freqMenu.autoenablesItems = false
+        for s in ProcessListView.intervalOptions {
+            let mi = NSMenuItem(title: "\(s) s", action: #selector(intervalChosen(_:)),
+                                keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = s
+            mi.state = (s == processList.intervalSeconds) ? .on : .off
+            freqMenu.addItem(mi)
+        }
+        freq.submenu = freqMenu
+        menu.addItem(freq)
+
+        let cols = NSMenuItem(title: "Columns", action: nil, keyEquivalent: "")
+        cols.submenu = processList.columnSelectorMenu()
+        cols.isEnabled = onProcess
+        menu.addItem(cols)
+
+        // Destructive action last.
+        menu.addItem(.separator())
+        let force = NSMenuItem(title: "Force Quit Process…",
+                               action: #selector(ProcessListView.forceQuitSelected),
+                               keyEquivalent: "")
+        force.target = processList
+        force.isEnabled = onProcess
+        menu.addItem(force)
+    }
+
+    @objc private func intervalChosen(_ sender: NSMenuItem) {
+        guard let s = sender.representedObject as? Int else { return }
+        processList.applyInterval(s)
     }
 
     // Menu-driven selection (⌘1 / ⌘2 from the app's Window menu).
@@ -336,11 +505,24 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate {
     private func applySelection(_ index: Int) {
         let i = max(0, index)
         selector.selectedSegment = i
-        if i == 0 {
-            tabs.selectTabViewItem(at: 0)
-        } else {
+        let onProcess = i > 0
+        if onProcess {
             tabs.selectTabViewItem(at: 1)
             if let t = ProcessListView.Tab(rawValue: i - 1) { processList.showCategory(t) }
+        } else {
+            tabs.selectTabViewItem(at: 0)
+        }
+        // Process-only toolbar items hide on the Chart tab (macOS 15+;
+        // merely disabled on 14, where NSToolbarItem.isHidden doesn't exist).
+        quitItem?.isEnabled = onProcess
+        inspectItem?.isEnabled = onProcess
+        if #available(macOS 15.0, *) {
+            quitItem?.isHidden = !onProcess
+            inspectItem?.isHidden = !onProcess
+        }
+        if let search = searchItem {
+            search.searchField.isEnabled = onProcess
+            if !onProcess { search.endSearchInteraction() }
         }
     }
 

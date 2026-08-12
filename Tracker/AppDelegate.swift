@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let disk = DiskSampler()
     private let memory = MemorySampler()
     private let processes = ProcessSampler()
+    private let network = NetworkSampler()
     private var processTickCount: Int = 0
     private var processIntervalSeconds: Int = 2
     private var renderer: HistoryRenderer!
@@ -437,7 +438,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pushSystemStats()
             processTickCount += 1
             if processTickCount >= processIntervalSeconds {
-                chart?.processList.setSnapshots(processes.sample())
+                network.kick()   // async; merges whatever sample completed last
+                var snaps = processes.sample()
+                for i in snaps.indices {
+                    guard let n = network.latest[snaps[i].pid] else { continue }
+                    snaps[i].netRxBytesPerSec = n.rxPerSec
+                    snaps[i].netTxBytesPerSec = n.txPerSec
+                    snaps[i].netRxTotal = n.rxTotal
+                    snaps[i].netTxTotal = n.txTotal
+                }
+                chart?.processList.setSnapshots(snaps)
                 processTickCount = 0
             }
         }
@@ -464,7 +474,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             batteryCharging: b.isCharging, batteryExternal: b.externalConnected,
             batteryMinutesToFull: b.minutesToFull,
             batteryMinutesToEmpty: b.minutesToEmpty,
-            batteryCapacityWh: b.capacityWh))
+            batteryCapacityWh: b.capacityWh,
+            netRxPerSec: network.totals.rxPerSec,
+            netTxPerSec: network.totals.txPerSec))
     }
 
     private func buildMainMenu() -> NSMenu {

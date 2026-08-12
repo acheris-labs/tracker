@@ -18,6 +18,13 @@ struct ProcessSnapshot {
     let idleWakeups: Int        // package idle wake-ups during the interval
     let isTranslated: Bool      // running under Rosetta → Kind = Intel
     let execPath: String        // executable path, for the process icon
+
+    // Network, merged in by the app from NetworkSampler (nettop) after
+    // sampling — zero for processes with no sockets.
+    var netRxBytesPerSec = 0.0
+    var netTxBytesPerSec = 0.0
+    var netRxTotal = 0.0        // cumulative bytes received
+    var netTxTotal = 0.0        // cumulative bytes sent
 }
 
 final class ProcessSampler {

@@ -11,6 +11,30 @@ auto-update prompt.
 
 ## [Unreleased]
 
+### Added
+- **Network tab.** Per-process Sent/s, Rcvd/s, and lifetime Sent/Rcvd Bytes
+  (sampled via `nettop`; Apple offers no public per-process network API), with
+  an Activity-Monitor-style footer: colored rates, a mirrored DATA graph, and
+  data received/sent totals.
+
+### Changed
+- **Activity-Monitor look and feel for the process tabs.** The window now uses
+  a native unified toolbar (quit/inspect buttons, "…" menu with Update
+  Frequency/Columns/Force Quit, centered tab selector, collapsing search
+  field); the old in-content toolbar row is gone. Tables use system
+  backgrounds and alternating rows, 24pt rows with 13pt text, faint column
+  separators, and AM column titles/order; Process Name flexes to fill the
+  window. Footers are AM-style boxed panes with live graphs (CPU LOAD, MEMORY
+  USED, ENERGY IMPACT/BATTERY, disk IO) and colored stat values.
+- The Chart tab sits on the system background instead of a custom black panel,
+  matching the process tabs. The chart itself (translucent stacked areas, GPU
+  glow) and the menu-bar icon are unchanged.
+- The quit/inspect toolbar buttons hide on the Chart tab.
+
+### Fixed
+- Process tables no longer flicker on refresh: cells are reused, column
+  widths no longer re-fit every tick, and the selection survives reloads.
+
 ## [0.2.8] - 2026-07-24
 
 ### Fixed

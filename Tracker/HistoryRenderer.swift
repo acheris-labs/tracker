@@ -205,9 +205,11 @@ final class HistoryRenderer {
         return image
     }
 
-    func draw(in rect: NSRect, smoothed: Bool = false) {
-        let bg = NSColor(white: 0.04, alpha: 1)
-        bg.setFill()
+    /// `background` defaults to the dark fill the menu-bar icon needs; the
+    /// Chart window passes a system color so the card tracks the appearance.
+    func draw(in rect: NSRect, smoothed: Bool = false,
+              background: NSColor = NSColor(white: 0.04, alpha: 1)) {
+        background.setFill()
         rect.fill()
 
         let inner = rect
