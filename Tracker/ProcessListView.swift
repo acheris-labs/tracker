@@ -433,6 +433,8 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         table.headerView = NSTableHeaderView()
         table.dataSource = self
         table.delegate = self
+        table.target = self
+        table.doubleAction = #selector(rowDoubleClicked(_:))   // AM behavior
 
         // Process first (matches Activity Monitor); add order is the display
         // order across all tabs. Each tab shows a subset via selectTab().
@@ -619,7 +621,33 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         force.target = self
         menu.addItem(kill)
         menu.addItem(force)
+        menu.addItem(.separator())
+        let reveal = NSMenuItem(title: "Reveal in Finder",
+                                action: #selector(revealInFinder(_:)),
+                                keyEquivalent: "")
+        reveal.target = self
+        menu.addItem(reveal)
+        let copyPath = NSMenuItem(title: "Copy Path",
+                                  action: #selector(copyPath(_:)),
+                                  keyEquivalent: "")
+        copyPath.target = self
+        menu.addItem(copyPath)
         table.menu = menu
+    }
+
+    @objc private func revealInFinder(_ sender: Any?) {
+        guard let row = clickedRow() else { return }
+        let path = rows[row].execPath
+        guard !path.isEmpty else { NSSound.beep(); return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    @objc private func copyPath(_ sender: Any?) {
+        guard let row = clickedRow() else { return }
+        let path = rows[row].execPath
+        guard !path.isEmpty else { NSSound.beep(); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(path, forType: .string)
     }
 
     // NSMenuDelegate — refresh item titles to include the clicked process name.
@@ -719,7 +747,15 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     @objc func inspectSelected() {
         guard let r = selectedRowIndex() else { NSSound.beep(); return }
-        let snap = rows[r]
+        openInspector(for: rows[r])
+    }
+
+    @objc private func rowDoubleClicked(_ sender: Any?) {
+        guard let r = clickedRow() else { return }
+        openInspector(for: rows[r])
+    }
+
+    private func openInspector(for snap: ProcessSnapshot) {
         if let existing = inspectors[snap.pid] {
             existing.window?.makeKeyAndOrderFront(nil)
             return
@@ -727,6 +763,13 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         let panel = InspectorPanelController(snapshot: snap,
                                              icon: icon(forExecPath: snap.execPath))
         panel.onClose = { [weak self] in self?.inspectors[snap.pid] = nil }
+        // Cascade additional panels so they don't restore exactly on top of
+        // one another (they share a frame-autosave name).
+        if !inspectors.isEmpty, let frame = panel.window?.frame {
+            let n = CGFloat(inspectors.count)
+            panel.window?.setFrameOrigin(NSPoint(x: frame.origin.x + 24 * n,
+                                                 y: frame.origin.y - 24 * n))
+        }
         inspectors[snap.pid] = panel
         panel.update(with: snap, parentName: parentName(of: snap))
         panel.showWindow(nil)
@@ -738,11 +781,16 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         if let name = allRows.first(where: { $0.pid == snap.ppid })?.name {
             return name
         }
-        // Parents we can't fully sample (e.g. root's launchd) still have a
-        // name via proc_name.
-        var buf = [CChar](repeating: 0, count: 256)
-        let n = proc_name(snap.ppid, &buf, UInt32(buf.count))
-        return n > 0 ? String(cString: buf) : nil
+        // Parents we can't fully sample (e.g. root's launchd) still resolve
+        // via sysctl — unlike proc_name, it works across users.
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, snap.ppid]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let name = withUnsafeBytes(of: info.kp_proc.p_comm) { raw in
+            String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+        }
+        return name.isEmpty ? nil : name
     }
 
     /// User dragged a column divider. Name: remember it and stop auto-fill.

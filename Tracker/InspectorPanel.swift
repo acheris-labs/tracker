@@ -5,14 +5,56 @@ import Darwin
 /// (path, parent, user, % CPU), then a bordered box with Memory ·
 /// Statistics · Open Files & Ports tabs, and a Quit button. All data comes
 /// from public APIs; live-updated each refresh tick by ProcessListView.
+/// Two-column label/value form: labels right-aligned against a spine,
+/// values left-aligned after it — the layout AM's inspector uses.
+private final class InspectorForm: NSView {
+    private var valueFields: [NSTextField] = []
+
+    init(labels: [String]) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        var rows: [[NSView]] = []
+        for l in labels {
+            let label = NSTextField(labelWithString: l)
+            label.font = .systemFont(ofSize: 11)
+            label.textColor = .secondaryLabelColor
+            let value = NSTextField(labelWithString: "—")
+            value.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            value.lineBreakMode = .byTruncatingMiddle
+            valueFields.append(value)
+            rows.append([label, value])
+        }
+        let grid = NSGridView(views: rows)
+        grid.rowSpacing = 5
+        grid.columnSpacing = 8
+        grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 1).xPlacement = .leading
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(grid)
+        NSLayoutConstraint.activate([
+            grid.topAnchor.constraint(equalTo: topAnchor),
+            grid.bottomAnchor.constraint(equalTo: bottomAnchor),
+            grid.leadingAnchor.constraint(equalTo: leadingAnchor),
+            grid.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not implemented") }
+
+    func setValue(_ s: String, at i: Int) {
+        guard i >= 0, i < valueFields.count else { return }
+        valueFields[i].stringValue = s
+    }
+}
+
 final class InspectorPanelController: NSWindowController, NSWindowDelegate {
     let pid: pid_t
     var onClose: (() -> Void)?
 
     private let pathValue = NSTextField(labelWithString: "")
-    private let topGrid: FooterStatGrid
-    private let memoryGrid: FooterStatGrid
-    private let statsGrid: FooterStatGrid
+    private let topGrid: InspectorForm
+    private let memoryGrid: InspectorForm
+    private let statsGrid: InspectorForm
     private let segment = NSSegmentedControl(
         labels: ["Memory", "Statistics", "Open Files & Ports"],
         trackingMode: .selectOne, target: nil, action: nil)
@@ -66,9 +108,8 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
 
     init(snapshot: ProcessSnapshot, icon: NSImage) {
         self.pid = snapshot.pid
-        func grid(_ labels: [String]) -> FooterStatGrid {
-            FooterStatGrid(rows: labels.map { .init(label: $0, color: nil) },
-                           pinned: true)
+        func grid(_ labels: [String]) -> InspectorForm {
+            InspectorForm(labels: labels)
         }
         topGrid = grid(TopRow.allCases.map(\.label))
         memoryGrid = grid(MemRow.allCases.map(\.label))
@@ -83,6 +124,8 @@ final class InspectorPanelController: NSWindowController, NSWindowDelegate {
         win.isReleasedWhenClosed = false
         win.minSize = NSSize(width: 420, height: 420)
         super.init(window: win)
+        shouldCascadeWindows = false          // would defeat the autosave name
+        windowFrameAutosaveName = "InspectorPanel"
         win.delegate = self
         buildContent(window: win, snapshot: snapshot, icon: icon)
         win.center()

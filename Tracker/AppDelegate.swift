@@ -518,6 +518,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         procItem.target = self
         appMenu.addItem(procItem)
+        let findItem = NSMenuItem(
+            title: "Filter Processes…",
+            action: #selector(ChartWindowController.focusSearch(_:)),
+            keyEquivalent: "f"
+        )
+        appMenu.addItem(findItem)   // nil target: resolves via responder chain
         let prefsItem = NSMenuItem(
             title: "Preferences…",
             action: #selector(showPreferences(_:)),

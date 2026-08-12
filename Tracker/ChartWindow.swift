@@ -156,9 +156,21 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         win.center()
 
         super.init(window: win)
+        // Remember size/position across launches (restores over center()).
+        // Must be configured on the CONTROLLER: NSWindowController cascades
+        // windows by default, which silently defeats the window-level
+        // setFrameAutosaveName.
+        shouldCascadeWindows = false
+        windowFrameAutosaveName = "ChartWindow"
         win.delegate = self
         buildContent(window: win)
         buildToolbar(window: win)
+    }
+
+    /// ⌘F from the main menu — focuses the toolbar search on process tabs.
+    @objc func focusSearch(_ sender: Any?) {
+        guard selector.selectedSegment > 0 else { NSSound.beep(); return }
+        searchItem?.beginSearchInteraction()
     }
 
     /// Activity-Monitor-style unified toolbar: quit/inspect/… at the leading
