@@ -1,18 +1,13 @@
 import AppKit
 
 final class PreferencesWindowController: NSWindowController {
-    private let durations: [(label: String, seconds: Int)]
-    private let onDurationChange: (Int) -> Void
     private let onColorsChange: (ChartColors) -> Void
-    private let onShowGPUChange: (Bool) -> Void
-    private let onShowBatteryChange: (Bool) -> Void
-    private let onShowMemoryChange: (Bool) -> Void
-    private let onShowDiskChange: (Bool) -> Void
+    private let onTracesChange: (TraceSurface, Set<ChartTrace>) -> Void
+    private var iconTraces: Set<ChartTrace>
+    private var chartTraces: Set<ChartTrace>
     private let onThresholdChange: (Int) -> Void
-    private let onAutoUpdateChange: (Bool) -> Void
     private weak var thresholdLabel: NSTextField?
 
-    private weak var popup: NSPopUpButton?
 
     // Order matches the chart stack (bottom to top), then overlays.
     private let colorRows: [(label: String, keyPath: WritableKeyPath<ChartColors, NSColor>)]
@@ -20,34 +15,20 @@ final class PreferencesWindowController: NSWindowController {
     private var colors: ChartColors
     private var initialThreshold: Int = 20
 
-    init(durations: [(label: String, seconds: Int)],
-         currentDuration: Int,
-         colors: ChartColors,
+    init(colors: ChartColors,
          hasBattery: Bool,
-         showGPU: Bool,
-         showBattery: Bool,
-         showMemory: Bool,
-         showDisk: Bool,
+         iconTraces: Set<ChartTrace>,
+         chartTraces: Set<ChartTrace>,
          drainThreshold: Int,
-         autoUpdate: Bool,
-         onDurationChange: @escaping (Int) -> Void,
          onColorsChange: @escaping (ChartColors) -> Void,
-         onShowGPUChange: @escaping (Bool) -> Void,
-         onShowBatteryChange: @escaping (Bool) -> Void,
-         onShowMemoryChange: @escaping (Bool) -> Void,
-         onShowDiskChange: @escaping (Bool) -> Void,
-         onThresholdChange: @escaping (Int) -> Void,
-         onAutoUpdateChange: @escaping (Bool) -> Void) {
-        self.durations = durations
+         onTracesChange: @escaping (TraceSurface, Set<ChartTrace>) -> Void,
+         onThresholdChange: @escaping (Int) -> Void) {
         self.colors = colors
-        self.onDurationChange = onDurationChange
         self.onColorsChange = onColorsChange
-        self.onShowGPUChange = onShowGPUChange
-        self.onShowBatteryChange = onShowBatteryChange
-        self.onShowMemoryChange = onShowMemoryChange
-        self.onShowDiskChange = onShowDiskChange
+        self.onTracesChange = onTracesChange
+        self.iconTraces = iconTraces
+        self.chartTraces = chartTraces
         self.onThresholdChange = onThresholdChange
-        self.onAutoUpdateChange = onAutoUpdateChange
         self.initialThreshold = drainThreshold
 
         var rows: [(label: String, keyPath: WritableKeyPath<ChartColors, NSColor>)] = [
@@ -57,9 +38,13 @@ final class PreferencesWindowController: NSWindowController {
             ("E-core user",   \.eUser),
             ("GPU",           \.gpu),
         ]
+        if hasBattery { rows.append(("Battery", \.battery)) }
         rows.append(("Memory",     \.memory))
+        rows.append(("Swap",       \.swap))
         rows.append(("Disk read",  \.diskRead))
         rows.append(("Disk write", \.diskWrite))
+        rows.append(("Net received", \.netRx))
+        rows.append(("Net sent",     \.netTx))
         self.colorRows = rows
 
         let win = NSWindow(
@@ -79,43 +64,9 @@ final class PreferencesWindowController: NSWindowController {
         grid.rowSpacing = 10
         grid.columnSpacing = 10
 
-        // Duration row
-        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-        for d in durations {
-            popup.addItem(withTitle: d.label)
-            popup.lastItem?.tag = d.seconds
-        }
-        popup.target = self
-        popup.action = #selector(durationChanged(_:))
-        self.popup = popup
-        select(seconds: currentDuration)
-        grid.addRow(with: [Self.label("History duration:"), popup])
-
-        // Show/hide overlays
-        let gpuCheck = NSButton(checkboxWithTitle: "Show GPU",
-                                target: self, action: #selector(toggleShowGPU(_:)))
-        gpuCheck.state = showGPU ? .on : .off
-        grid.addRow(with: [Self.label("Display:"), gpuCheck])
-        if hasBattery {
-            let batCheck = NSButton(checkboxWithTitle: "Show Battery",
-                                    target: self, action: #selector(toggleShowBattery(_:)))
-            batCheck.state = showBattery ? .on : .off
-            grid.addRow(with: [Self.label(""), batCheck])
-        }
-        let memCheck = NSButton(checkboxWithTitle: "Show Memory",
-                                target: self, action: #selector(toggleShowMemory(_:)))
-        memCheck.state = showMemory ? .on : .off
-        grid.addRow(with: [Self.label(""), memCheck])
-
-        let diskCheck = NSButton(checkboxWithTitle: "Show Disk I/O",
-                                 target: self, action: #selector(toggleShowDisk(_:)))
-        diskCheck.state = showDisk ? .on : .off
-        grid.addRow(with: [Self.label(""), diskCheck])
-
-        let autoUpdateCheck = NSButton(checkboxWithTitle: "Check for updates automatically",
-                                       target: self, action: #selector(toggleAutoUpdate(_:)))
-        autoUpdateCheck.state = autoUpdate ? .on : .off
-        grid.addRow(with: [Self.label("Updates:"), autoUpdateCheck])
+        // Trace table: one row per trace — label · color well(s) · where it
+        // shows (Dock / Chart).
+        buildTraceTable(grid: grid, hasBattery: hasBattery)
 
         // Drain alert threshold (W) — slider + value label.
         let slider = NSSlider(value: Double(initialThreshold),
@@ -140,20 +91,6 @@ final class PreferencesWindowController: NSWindowController {
         thresholdRow.spacing = 8
         thresholdRow.alignment = .centerY
         grid.addRow(with: [Self.label("Drain alert above:"), thresholdRow])
-
-        // Color rows
-        for (i, row) in colorRows.enumerated() {
-            let well = NSColorWell()
-            well.color = colors[keyPath: row.keyPath]
-            well.tag = i
-            well.target = self
-            well.action = #selector(colorChanged(_:))
-            well.translatesAutoresizingMaskIntoConstraints = false
-            well.widthAnchor.constraint(equalToConstant: 60).isActive = true
-            well.heightAnchor.constraint(equalToConstant: 22).isActive = true
-            colorWells.append(well)
-            grid.addRow(with: [Self.label(row.label + ":"), well])
-        }
 
         // Right-align the label column
         if grid.numberOfColumns > 0 {
@@ -184,8 +121,6 @@ final class PreferencesWindowController: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
 
-    func sync(currentDuration: Int) { select(seconds: currentDuration) }
-
     func sync(colors: ChartColors) {
         self.colors = colors
         for (i, row) in colorRows.enumerated() {
@@ -199,19 +134,6 @@ final class PreferencesWindowController: NSWindowController {
         return t
     }
 
-    private func select(seconds: Int) {
-        guard let popup else { return }
-        for i in 0..<popup.numberOfItems where popup.item(at: i)?.tag == seconds {
-            popup.selectItem(at: i)
-            return
-        }
-    }
-
-    @objc private func durationChanged(_ sender: NSPopUpButton) {
-        let seconds = sender.selectedItem?.tag ?? 0
-        if seconds > 0 { onDurationChange(seconds) }
-    }
-
     @objc private func colorChanged(_ sender: NSColorWell) {
         let i = sender.tag
         guard i >= 0, i < colorRows.count else { return }
@@ -219,24 +141,94 @@ final class PreferencesWindowController: NSWindowController {
         onColorsChange(colors)
     }
 
-    @objc private func toggleShowGPU(_ sender: NSButton) {
-        onShowGPUChange(sender.state == .on)
+    /// One color well bound to a colorRows entry (tag drives colorChanged).
+    private func makeWell(colorIndex i: Int) -> NSColorWell {
+        let well = NSColorWell()
+        well.color = colors[keyPath: colorRows[i].keyPath]
+        well.toolTip = colorRows[i].label
+        well.tag = i
+        well.target = self
+        well.action = #selector(colorChanged(_:))
+        well.translatesAutoresizingMaskIntoConstraints = false
+        well.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        well.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        colorWells.append(well)
+        return well
     }
 
-    @objc private func toggleShowBattery(_ sender: NSButton) {
-        onShowBatteryChange(sender.state == .on)
+    private func makeSurfaceCheck(_ trace: ChartTrace, surface: TraceSurface,
+                                  traces: Set<ChartTrace>) -> NSButton {
+        let check = NSButton(checkboxWithTitle: "", target: self,
+                             action: #selector(traceToggled(_:)))
+        check.state = traces.contains(trace) ? .on : .off
+        check.tag = (surface == .dock ? 0 : 100) + ChartTrace.allCases.firstIndex(of: trace)!
+        return check
     }
 
-    @objc private func toggleShowMemory(_ sender: NSButton) {
-        onShowMemoryChange(sender.state == .on)
+    private static func columnHeader(_ s: String) -> NSTextField {
+        let t = NSTextField(labelWithString: s)
+        t.font = .systemFont(ofSize: 11, weight: .semibold)
+        t.textColor = .secondaryLabelColor
+        t.alignment = .center
+        return t
     }
 
-    @objc private func toggleShowDisk(_ sender: NSButton) {
-        onShowDiskChange(sender.state == .on)
+    /// Rows: trace · its color well(s) · Dock checkbox · Chart checkbox.
+    /// colorWells must be appended in colorRows order, so wells are created
+    /// in that same order here.
+    private func buildTraceTable(grid: NSGridView, hasBattery: Bool) {
+        grid.addRow(with: [Self.label(""), Self.columnHeader("Color"),
+                           Self.columnHeader("Dock"), Self.columnHeader("Chart")])
+
+        func wellStack(_ idxs: [Int]) -> NSView {
+            let stack = NSStackView(views: idxs.map(makeWell(colorIndex:)))
+            stack.orientation = .horizontal
+            stack.spacing = 4
+            return stack
+        }
+        // Index into colorRows by label lookup so battery's presence can't
+        // silently shift positions.
+        func idx(_ label: String) -> Int {
+            colorRows.firstIndex { $0.label == label }!
+        }
+
+        func traceRow(_ title: String, _ trace: ChartTrace, wells: [Int]) {
+            grid.addRow(with: [Self.label(title),
+                               wellStack(wells),
+                               makeSurfaceCheck(trace, surface: .dock, traces: iconTraces),
+                               makeSurfaceCheck(trace, surface: .chart, traces: chartTraces)])
+        }
+        traceRow("CPU:", .cpu, wells: [idx("P-core system"), idx("E-core system"),
+                                       idx("P-core user"), idx("E-core user")])
+        traceRow("GPU:", .gpu, wells: [idx("GPU")])
+        if hasBattery { traceRow("Battery:", .battery, wells: [idx("Battery")]) }
+        traceRow("Memory:", .memory, wells: [idx("Memory")])
+        traceRow("Swap:", .swap, wells: [idx("Swap")])
+        traceRow("Disk I/O:", .disk, wells: [idx("Disk read"), idx("Disk write")])
+        traceRow("Network:", .network, wells: [idx("Net received"), idx("Net sent")])
+
+        // Center the checkbox columns under their headers.
+        if grid.numberOfColumns >= 4 {
+            grid.column(at: 2).xPlacement = .center
+            grid.column(at: 3).xPlacement = .center
+        }
     }
 
-    @objc private func toggleAutoUpdate(_ sender: NSButton) {
-        onAutoUpdateChange(sender.state == .on)
+    @objc private func traceToggled(_ sender: NSButton) {
+        let surface: TraceSurface = sender.tag < 100 ? .dock : .chart
+        let idx = sender.tag % 100
+        guard idx < ChartTrace.allCases.count else { return }
+        let trace = ChartTrace.allCases[idx]
+        switch surface {
+        case .dock:
+            if sender.state == .on { iconTraces.insert(trace) }
+            else { iconTraces.remove(trace) }
+            onTracesChange(.dock, iconTraces)
+        case .chart:
+            if sender.state == .on { chartTraces.insert(trace) }
+            else { chartTraces.remove(trace) }
+            onTracesChange(.chart, chartTraces)
+        }
     }
 
     @objc private func thresholdChanged(_ sender: NSSlider) {

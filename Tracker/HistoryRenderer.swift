@@ -7,6 +7,9 @@ struct HistoryFrame {
     let memory: Double       // 0..1
     let diskRead: Double     // bytes/sec
     let diskWrite: Double    // bytes/sec
+    let netRx: Double        // bytes/sec
+    let netTx: Double        // bytes/sec
+    let swap: Double         // swap used / swap total, 0..1 (0 when no swap)
 }
 
 struct ChartColors {
@@ -15,9 +18,13 @@ struct ChartColors {
     var pUser: NSColor
     var eUser: NSColor
     var gpu: NSColor
+    var battery: NSColor
     var memory: NSColor
+    var swap: NSColor
     var diskRead: NSColor
     var diskWrite: NSColor
+    var netRx: NSColor
+    var netTx: NSColor
 
     static let `default` = ChartColors(
         pSys:      NSColor(srgbRed: 0.95, green: 0.20, blue: 0.20, alpha: 1),
@@ -25,17 +32,26 @@ struct ChartColors {
         pUser:     NSColor(srgbRed: 0.20, green: 0.85, blue: 0.30, alpha: 1),
         eUser:     NSColor(srgbRed: 0.30, green: 0.62, blue: 1.00, alpha: 1),
         gpu:       NSColor(srgbRed: 0.70, green: 0.45, blue: 1.00, alpha: 1),
+        battery:   NSColor(srgbRed: 1.00, green: 0.85, blue: 0.25, alpha: 1),
         memory:    NSColor(srgbRed: 0.92, green: 0.92, blue: 0.92, alpha: 1),
-        diskRead:  NSColor(srgbRed: 0.20, green: 0.85, blue: 0.85, alpha: 1),
-        diskWrite: NSColor(srgbRed: 1.00, green: 0.85, blue: 0.25, alpha: 1)
+        swap:      NSColor(srgbRed: 0.80, green: 0.68, blue: 0.50, alpha: 1),
+        // Hue-grouped bytes/sec palette: cool hues = inbound (read/rcvd),
+        // warm hues = outbound (write/sent); disk saturated, network pale.
+        diskRead:  NSColor(srgbRed: 0.10, green: 0.80, blue: 0.95, alpha: 1),
+        diskWrite: NSColor(srgbRed: 1.00, green: 0.30, blue: 0.45, alpha: 1),
+        netRx:     NSColor(srgbRed: 0.65, green: 0.90, blue: 1.00, alpha: 1),
+        netTx:     NSColor(srgbRed: 1.00, green: 0.72, blue: 0.62, alpha: 1)
     )
 
     private static let keys = (
         pSys: "Color.pSys", eSys: "Color.eSys",
         pUser: "Color.pUser", eUser: "Color.eUser",
         gpu: "Color.gpu",
+        battery: "Color.battery",
         memory: "Color.memory",
-        diskRead: "Color.diskRead", diskWrite: "Color.diskWrite"
+        swap: "Color.swap",
+        diskRead: "Color.diskRead", diskWrite: "Color.diskWrite",
+        netRx: "Color.netRx", netTx: "Color.netTx"
     )
 
     static func load() -> ChartColors {
@@ -47,9 +63,13 @@ struct ChartColors {
             pUser:     d.string(forKey: keys.pUser).flatMap(NSColor.fromHex) ?? def.pUser,
             eUser:     d.string(forKey: keys.eUser).flatMap(NSColor.fromHex) ?? def.eUser,
             gpu:       d.string(forKey: keys.gpu).flatMap(NSColor.fromHex) ?? def.gpu,
+            battery:   d.string(forKey: keys.battery).flatMap(NSColor.fromHex) ?? def.battery,
             memory:    d.string(forKey: keys.memory).flatMap(NSColor.fromHex) ?? def.memory,
+            swap:      d.string(forKey: keys.swap).flatMap(NSColor.fromHex) ?? def.swap,
             diskRead:  d.string(forKey: keys.diskRead).flatMap(NSColor.fromHex) ?? def.diskRead,
-            diskWrite: d.string(forKey: keys.diskWrite).flatMap(NSColor.fromHex) ?? def.diskWrite
+            diskWrite: d.string(forKey: keys.diskWrite).flatMap(NSColor.fromHex) ?? def.diskWrite,
+            netRx:     d.string(forKey: keys.netRx).flatMap(NSColor.fromHex) ?? def.netRx,
+            netTx:     d.string(forKey: keys.netTx).flatMap(NSColor.fromHex) ?? def.netTx
         )
     }
 
@@ -60,9 +80,13 @@ struct ChartColors {
         d.set(pUser.hexString,     forKey: ChartColors.keys.pUser)
         d.set(eUser.hexString,     forKey: ChartColors.keys.eUser)
         d.set(gpu.hexString,       forKey: ChartColors.keys.gpu)
+        d.set(battery.hexString,   forKey: ChartColors.keys.battery)
         d.set(memory.hexString,    forKey: ChartColors.keys.memory)
+        d.set(swap.hexString,      forKey: ChartColors.keys.swap)
         d.set(diskRead.hexString,  forKey: ChartColors.keys.diskRead)
         d.set(diskWrite.hexString, forKey: ChartColors.keys.diskWrite)
+        d.set(netRx.hexString,     forKey: ChartColors.keys.netRx)
+        d.set(netTx.hexString,     forKey: ChartColors.keys.netTx)
     }
 }
 
@@ -96,17 +120,47 @@ extension NSColor {
     }
 }
 
+/// The selectable traces, CPU stack included.
+enum ChartTrace: String, CaseIterable {
+    case cpu, gpu, battery, memory, swap, disk, network
+    var label: String {
+        switch self {
+        case .cpu: return "CPU"
+        case .gpu: return "GPU"
+        case .battery: return "Battery"
+        case .memory: return "Memory"
+        case .swap: return "Swap"
+        case .disk: return "Disk I/O"
+        case .network: return "Network"
+        }
+    }
+}
+
+/// Which surface a trace set customizes.
+enum TraceSurface { case dock, chart }
+
+/// A single drawable series — finer-grained than ChartTrace (CPU has four,
+/// disk and network two each). Used for legend-hover highlighting.
+enum ChartSeries: Equatable {
+    case pSys, eSys, pUser, eUser, gpu, battery, memory, swap
+    case diskRead, diskWrite, netRx, netTx
+}
+
 final class HistoryRenderer {
-    // Storage holds up to `storage` recent samples; the view window
-    // (`capacity`) selects how many of the most recent samples to draw.
-    // Decoupling the two means resizing the view never loses data.
-    static let maxStorage: Int = 600
+    // Storage holds up to `maxStorage` recent samples; two independent view
+    // windows select how many of the most recent samples each surface draws:
+    // the dock icon short ("what's happening right now"), the chart window
+    // long (up to an hour). Resizing either never loses data.
+    static let maxStorage: Int = 3600
 
     private var frames: [HistoryFrame]
     private var head: Int = 0
     private var count: Int = 0
 
-    private(set) var capacity: Int   // current view window in samples (= seconds at 1 Hz)
+    private(set) var iconCapacity: Int    // dock icon window (samples = seconds at 1 Hz)
+    private(set) var chartCapacity: Int   // chart window view
+    /// Window used by the draw helpers; set on entry to draw()/diskScaleMax().
+    private var activeWindow: Int = 8
 
     private let pointSize = NSSize(width: 128, height: 128)
     private let pixelScale: CGFloat = 2
@@ -125,39 +179,64 @@ final class HistoryRenderer {
     private let eWeight: Double
     let hasBattery: Bool
     var colors: ChartColors
-    var showGPU: Bool = true
-    var showBattery: Bool = true
-    var showMemory: Bool = true
-    var showDisk: Bool = true
+    // Independent per-surface trace sets: the dock icon usually wants the
+    // short "right now" essentials, the chart the full picture.
+    var iconTraces: Set<ChartTrace> = [.cpu, .gpu]
+    var chartTraces: Set<ChartTrace> = [.cpu, .gpu]
 
-    init(capacity: Int, numP: Int, numE: Int, hasBattery: Bool, colors: ChartColors) {
+    /// While set, the chart draws this series at full strength and dims the
+    /// rest (legend hover). The dock icon ignores it.
+    var highlightedSeries: ChartSeries?
+
+    /// The series' colour, dimmed toward neutral when another series is
+    /// highlighted. Blending (not alpha) keeps the band-alpha math intact.
+    private func seriesColor(_ base: NSColor, _ series: ChartSeries,
+                             smoothed: Bool) -> NSColor {
+        guard smoothed, let h = highlightedSeries, h != series else { return base }
+        // Nearly extinguish non-highlighted series: heavy blend toward a
+        // dark neutral plus an alpha cut, so even bright hues recede.
+        let ghost = base.blended(withFraction: 0.88, of: NSColor(white: 0.25, alpha: 1)) ?? base
+        return ghost.withAlphaComponent(0.55)
+    }
+
+    init(iconCapacity: Int, chartCapacity: Int, numP: Int, numE: Int,
+         hasBattery: Bool, colors: ChartColors) {
         self.colors = colors
         self.hasBattery = hasBattery
-        self.capacity = max(8, min(Self.maxStorage, capacity))
+        self.iconCapacity = max(8, min(Self.maxStorage, iconCapacity))
+        self.chartCapacity = max(8, min(Self.maxStorage, chartCapacity))
+        self.activeWindow = self.iconCapacity
         self.frames = Array(repeating: HistoryFrame(cpu: CPUFrame(), gpu: 0, battery: 0,
                                                     memory: 0,
-                                                    diskRead: 0, diskWrite: 0),
+                                                    diskRead: 0, diskWrite: 0,
+                                                    netRx: 0, netTx: 0, swap: 0),
                             count: Self.maxStorage)
         let total = max(1, numP + numE)
         self.pWeight = Double(numP) / Double(total)
         self.eWeight = Double(numE) / Double(total)
     }
 
-    func resize(capacity newCapacity: Int) {
-        capacity = max(8, min(Self.maxStorage, newCapacity))
+    func resizeIcon(capacity newCapacity: Int) {
+        iconCapacity = max(8, min(Self.maxStorage, newCapacity))
+    }
+
+    func resizeChart(capacity newCapacity: Int) {
+        chartCapacity = max(8, min(Self.maxStorage, newCapacity))
     }
 
     func append(cpu: CPUFrame, gpu: Double, battery: Double, memory: Double,
-                diskRead: Double, diskWrite: Double) {
+                diskRead: Double, diskWrite: Double,
+                netRx: Double = 0, netTx: Double = 0, swap: Double = 0) {
         frames[head] = HistoryFrame(cpu: cpu, gpu: gpu, battery: battery,
                                     memory: memory,
-                                    diskRead: diskRead, diskWrite: diskWrite)
+                                    diskRead: diskRead, diskWrite: diskWrite,
+                                    netRx: netRx, netTx: netTx, swap: swap)
         head = (head + 1) % Self.maxStorage
         if count < Self.maxStorage { count += 1 }
     }
 
     private func visibleCount() -> Int {
-        return min(count, capacity)
+        return min(count, activeWindow)
     }
 
     /// Index in `frames` for the i-th visible sample (0 = oldest visible).
@@ -166,17 +245,40 @@ final class HistoryRenderer {
         return (head - visible + i + Self.maxStorage * 2) % Self.maxStorage
     }
 
-    /// Visible-window max disk throughput in bytes/sec — what the chart's
-    /// right-axis auto-scale is currently mapped to. Floor 1 MiB/s.
-    func diskScaleMax() -> Double {
-        let visible = visibleCount()
-        var maxIO: Double = 1_048_576
+    /// Bottom of the shared logarithmic bytes/sec scale — rates at or below
+    /// this sit on the baseline.
+    static let byteScaleMinRate: Double = 1024
+
+    /// Top of the shared logarithmic bytes/sec scale: the visible-window max
+    /// across every shown bytes/sec series (disk r/w, network rx/tx), floor
+    /// 1 MiB/s. Log lets wildly different families share one honest axis.
+    func byteScaleMax() -> Double {
+        activeWindow = chartCapacity   // the chart's right axis uses this
+        return byteScaleMax(visible: visibleCount(), traces: chartTraces)
+    }
+
+    private func byteScaleMax(visible: Int, traces: Set<ChartTrace>) -> Double {
+        var maxRate: Double = 1_048_576
         for i in 0..<visible {
             let f = frames[visibleIndex(i)]
-            if f.diskRead > maxIO  { maxIO = f.diskRead }
-            if f.diskWrite > maxIO { maxIO = f.diskWrite }
+            if traces.contains(.disk) {
+                if f.diskRead > maxRate  { maxRate = f.diskRead }
+                if f.diskWrite > maxRate { maxRate = f.diskWrite }
+            }
+            if traces.contains(.network) {
+                if f.netRx > maxRate { maxRate = f.netRx }
+                if f.netTx > maxRate { maxRate = f.netTx }
+            }
         }
-        return maxIO
+        return maxRate
+    }
+
+    /// 0…1 position of a rate on the shared log scale.
+    private static func logNorm(_ v: Double, maxRate: Double) -> Double {
+        guard v > byteScaleMinRate else { return 0 }
+        let denom = log(maxRate / byteScaleMinRate)
+        guard denom > 0 else { return 0 }
+        return min(1.0, log(v / byteScaleMinRate) / denom)
     }
 
     func render() -> NSImage {
@@ -205,9 +307,14 @@ final class HistoryRenderer {
         return image
     }
 
-    func draw(in rect: NSRect, smoothed: Bool = false) {
-        let bg = NSColor(white: 0.04, alpha: 1)
-        bg.setFill()
+    /// `background` defaults to the dark fill the menu-bar icon needs; the
+    /// Chart window passes a system color so the card tracks the appearance.
+    func draw(in rect: NSRect, smoothed: Bool = false,
+              background: NSColor = NSColor(white: 0.04, alpha: 1)) {
+        // smoothed == the chart window; crisp == the dock icon.
+        activeWindow = smoothed ? chartCapacity : iconCapacity
+        let traces = smoothed ? chartTraces : iconTraces
+        background.setFill()
         rect.fill()
 
         let inner = rect
@@ -216,7 +323,7 @@ final class HistoryRenderer {
 
         let H = inner.height
         let W = inner.width
-        let colW = W / CGFloat(capacity)
+        let colW = W / CGFloat(activeWindow)
         let visible = visibleCount()
 
         // Two y-axes share the full drawable area:
@@ -242,44 +349,78 @@ final class HistoryRenderer {
         // through), on top in the opaque menu-bar image so it stays visible
         // at high CPU load.
         if visible > 1 {
-            if showMemory {
+            if traces.contains(.battery), hasBattery {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
-                         color: colors.memory, smoothed: smoothed) { $0.memory }
+                         color: seriesColor(colors.battery, .battery, smoothed: smoothed),
+                         smoothed: smoothed) { $0.battery }
             }
-            if showDisk {
-                // Independent auto-scale across read+write, floor 1 MiB/s.
-                var maxIO: Double = 1_048_576
-                for i in 0..<visible {
-                    let f = frames[visibleIndex(i)]
-                    if f.diskRead > maxIO  { maxIO = f.diskRead }
-                    if f.diskWrite > maxIO { maxIO = f.diskWrite }
-                }
+            if traces.contains(.memory) {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
-                         color: colors.diskRead, lineWidth: 1.25, smoothed: smoothed) {
-                    min(1.0, $0.diskRead / maxIO)
-                }
+                         color: seriesColor(colors.memory, .memory, smoothed: smoothed),
+                         smoothed: smoothed) { $0.memory }
+            }
+            if traces.contains(.swap) {
+                // Swap used as a fraction of swap total — rides the left
+                // percentage axis; flat zero while the system has no swap.
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
-                         color: colors.diskWrite, lineWidth: 1.25, smoothed: smoothed) {
-                    min(1.0, $0.diskWrite / maxIO)
+                         color: seriesColor(colors.swap, .swap, smoothed: smoothed),
+                         smoothed: smoothed) { $0.swap }
+            }
+            // Disk and network share one LOGARITHMIC bytes/sec scale: linear
+            // sharing would let either family's burst flatten the other, and
+            // separate scales made same-unit lines incomparable.
+            if traces.contains(.disk) || traces.contains(.network) {
+                let maxRate = byteScaleMax(visible: visible, traces: traces)
+                if traces.contains(.network) {
+                    drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                             bandY: inner.minY, bandH: cpuH,
+                             color: seriesColor(colors.netRx, .netRx, smoothed: smoothed),
+                             lineWidth: 1.25, smoothed: smoothed) {
+                        Self.logNorm($0.netRx, maxRate: maxRate)
+                    }
+                    drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                             bandY: inner.minY, bandH: cpuH,
+                             color: seriesColor(colors.netTx, .netTx, smoothed: smoothed),
+                             lineWidth: 1.25, smoothed: smoothed) {
+                        Self.logNorm($0.netTx, maxRate: maxRate)
+                    }
+                }
+                if traces.contains(.disk) {
+                    drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                             bandY: inner.minY, bandH: cpuH,
+                             color: seriesColor(colors.diskRead, .diskRead, smoothed: smoothed),
+                             lineWidth: 1.25, smoothed: smoothed) {
+                        Self.logNorm($0.diskRead, maxRate: maxRate)
+                    }
+                    drawLine(visible: visible, xOffset: xOffset, colW: colW,
+                             bandY: inner.minY, bandH: cpuH,
+                             color: seriesColor(colors.diskWrite, .diskWrite, smoothed: smoothed),
+                             lineWidth: 1.25, smoothed: smoothed) {
+                        Self.logNorm($0.diskWrite, maxRate: maxRate)
+                    }
                 }
             }
         }
 
-        if visible > 1, showGPU, smoothed {
+        if visible > 1, traces.contains(.gpu), smoothed {
             drawLine(visible: visible, xOffset: xOffset, colW: colW,
                      bandY: inner.minY, bandH: cpuH,
-                     color: colors.gpu, smoothed: true,
+                     color: seriesColor(colors.gpu, .gpu, smoothed: true),
+                     smoothed: true,
                      glowDepth: Self.gpuGlowDepth) { $0.gpu }
         }
 
-        if smoothed {
+        if traces.contains(.cpu), smoothed {
             drawCPUArea(visible: visible, xOffset: xOffset, colW: colW,
                         baseY: inner.minY, cpuH: cpuH,
-                        colors: [pSysColor, eSysColor, pUsrColor, eUsrColor])
-        } else {
+                        colors: [seriesColor(pSysColor, .pSys, smoothed: true),
+                                 seriesColor(eSysColor, .eSys, smoothed: true),
+                                 seriesColor(pUsrColor, .pUser, smoothed: true),
+                                 seriesColor(eUsrColor, .eUser, smoothed: true)])
+        } else if traces.contains(.cpu) {
             for i in 0..<visible {
                 let f = frames[visibleIndex(i)]
                 let x = inner.minX + xOffset + CGFloat(i) * colW
@@ -304,7 +445,7 @@ final class HistoryRenderer {
             }
         }
 
-        if visible > 1, showGPU, !smoothed {
+        if visible > 1, traces.contains(.gpu), !smoothed {
             drawLine(visible: visible, xOffset: xOffset, colW: colW,
                      bandY: inner.minY, bandH: cpuH,
                      color: colors.gpu, smoothed: false) { $0.gpu }

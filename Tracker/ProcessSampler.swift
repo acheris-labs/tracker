@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import IOKit.pwr_mgt
 
 struct ProcessSnapshot {
     let pid: Int32
@@ -7,6 +8,7 @@ struct ProcessSnapshot {
     let user: String
     let cpuPercent: Double   // percent of one core; 100% = one full core
     let rssMB: Double
+    let vsizeMB: Double         // virtual size, for the inspector's Memory tab
     let threads: Int
     let diskReadBytesPerSec: Double
     let diskWriteBytesPerSec: Double
@@ -18,6 +20,47 @@ struct ProcessSnapshot {
     let idleWakeups: Int        // package idle wake-ups during the interval
     let isTranslated: Bool      // running under Rosetta → Kind = Intel
     let execPath: String        // executable path, for the process icon
+    let ppid: Int32             // parent pid (0 if unknown)
+
+    // Network, merged in by the app from NetworkSampler (nettop) after
+    // sampling — zero for processes with no sockets.
+    var netRxBytesPerSec = 0.0
+    var netTxBytesPerSec = 0.0
+    var netRxTotal = 0.0        // cumulative bytes received
+    var netTxTotal = 0.0        // cumulative bytes sent
+    var netRxPackets = 0.0      // cumulative packets received
+    var netTxPackets = 0.0      // cumulative packets sent
+
+    // Merged in from SleepAssertions (Energy tab's "Preventing Sleep").
+    var preventsSleep = false
+}
+
+/// PIDs currently holding power assertions that keep the machine awake —
+/// public IOKit API, same source as `pmset -g assertions`.
+enum SleepAssertions {
+    private static let preventing: Set<String> = [
+        "PreventUserIdleSystemSleep", "PreventUserIdleDisplaySleep",
+        "PreventSystemSleep", "NoIdleSleepAssertion", "NoDisplaySleepAssertion",
+    ]
+
+    static func pids() -> Set<pid_t> {
+        var dict: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&dict) == kIOReturnSuccess,
+              let byPid = dict?.takeRetainedValue() as? [Int: [[String: Any]]] else {
+            return []
+        }
+        var out = Set<pid_t>()
+        for (pid, assertions) in byPid {
+            for a in assertions {
+                if let type = a[kIOPMAssertionTypeKey as String] as? String,
+                   preventing.contains(type) {
+                    out.insert(pid_t(pid))
+                    break
+                }
+            }
+        }
+        return out
+    }
 }
 
 final class ProcessSampler {
@@ -78,7 +121,12 @@ final class ProcessSampler {
             proc_pidinfo(pid, PROC_PIDTASKINFO, 0, ptr,
                          Int32(MemoryLayout<proc_taskinfo>.size))
         }
-        guard ti == Int32(MemoryLayout<proc_taskinfo>.size) else { return nil }
+        // Other users' processes can't be stat'ed without entitlements, but
+        // they still exist — list them with identity only (blank stats) so
+        // the All / System scopes aren't silently just "my processes".
+        guard ti == Int32(MemoryLayout<proc_taskinfo>.size) else {
+            return minimalSnapshot(pid: pid)
+        }
 
         let totalNanos = machTicksToNanos(taskInfo.pti_total_user + taskInfo.pti_total_system)
 
@@ -143,17 +191,21 @@ final class ProcessSampler {
             proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, ptr,
                          Int32(MemoryLayout<proc_bsdinfo>.size))
         }
-        let uid: uid_t = (bi == Int32(MemoryLayout<proc_bsdinfo>.size)) ? bsd.pbi_uid : 0
+        let bsdOK = bi == Int32(MemoryLayout<proc_bsdinfo>.size)
+        let uid: uid_t = bsdOK ? bsd.pbi_uid : 0
+        let ppid: Int32 = bsdOK ? Int32(bsd.pbi_ppid) : 0
 
         let name = procName(pid: pid)
         let user = username(uid: uid)
         let rssMB = Double(taskInfo.pti_resident_size) / (1024 * 1024)
+        let vsizeMB = Double(taskInfo.pti_virtual_size) / (1024 * 1024)
         let threads = Int(taskInfo.pti_threadnum)
         let cpuTimeSeconds = Double(totalNanos) / 1_000_000_000.0
         let energyJoules = Double(rEnergy) / 1_000_000_000.0  // nanojoules → joules
 
         return ProcessSnapshot(pid: pid, name: name, user: user,
                                cpuPercent: cpuPercent, rssMB: rssMB,
+                               vsizeMB: vsizeMB,
                                threads: threads,
                                diskReadBytesPerSec: diskReadPerSec,
                                diskWriteBytesPerSec: diskWritePerSec,
@@ -164,7 +216,8 @@ final class ProcessSampler {
                                cpuTimeSeconds: cpuTimeSeconds,
                                idleWakeups: idleWakeups,
                                isTranslated: translated(pid: pid),
-                               execPath: path(pid: pid))
+                               execPath: path(pid: pid),
+                               ppid: ppid)
     }
 
     /// Executable path, cached for the pid's lifetime (used for the icon).
@@ -214,6 +267,29 @@ final class ProcessSampler {
         }
         if n > 0 { return String(cString: buf) }
         return "pid \(pid)"
+    }
+
+    /// Identity-only row for a process whose stats we can't read (other
+    /// users' processes): name + uid from sysctl, everything else zero.
+    private func minimalSnapshot(pid: Int32) -> ProcessSnapshot? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let name = withUnsafeBytes(of: info.kp_proc.p_comm) { raw in
+            String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+        }
+        guard !name.isEmpty else { return nil }
+        return ProcessSnapshot(pid: pid, name: name,
+                               user: username(uid: info.kp_eproc.e_ucred.cr_uid),
+                               cpuPercent: 0, rssMB: 0, vsizeMB: 0,
+                               threads: 0,
+                               diskReadBytesPerSec: 0, diskWriteBytesPerSec: 0,
+                               diskReadTotal: 0, diskWriteTotal: 0,
+                               powerWatts: 0, energyJoules: 0,
+                               cpuTimeSeconds: 0, idleWakeups: 0,
+                               isTranslated: false, execPath: "",
+                               ppid: Int32(info.kp_eproc.e_ppid))
     }
 
     private func username(uid: uid_t) -> String {

@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let disk = DiskSampler()
     private let memory = MemorySampler()
     private let processes = ProcessSampler()
+    private let network = NetworkSampler()
     private var processTickCount: Int = 0
     private var processIntervalSeconds: Int = 2
     private var renderer: HistoryRenderer!
@@ -47,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return f
     }()
 
-    private let durations: [(label: String, seconds: Int)] = [
+    static let durations: [(label: String, seconds: Int)] = [
         ("15 seconds", 15),
         ("30 seconds", 30),
         ("1 minute",   60),
@@ -57,19 +58,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ("10 minutes", 600),
     ]
 
+    /// Chart window durations — the longer-term picture, up to an hour.
+    static let chartDurations: [(label: String, seconds: Int)] = durations + [
+        ("15 minutes", 900),
+        ("30 minutes", 1800),
+        ("1 hour", 3600),
+    ]
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         processIntervalSeconds = max(1, min(60, Self.intDefault("ProcessRefreshSeconds", default: 2)))
-        let raw = UserDefaults.standard.integer(forKey: "HistorySeconds")
-        let capacity = raw <= 0 ? 120 : max(15, min(600, raw))
-        renderer = HistoryRenderer(capacity: capacity, numP: cpu.numP, numE: cpu.numE,
+        // Dock icon: short "right now" view; chart: longer-term picture.
+        // Migrates the old single HistorySeconds key to the dock's.
+        let d = UserDefaults.standard
+        var dockRaw = d.integer(forKey: "DockHistorySeconds")
+        if dockRaw <= 0 { dockRaw = d.integer(forKey: "HistorySeconds") }
+        let dockCapacity = dockRaw <= 0 ? 30 : max(15, min(600, dockRaw))
+        let chartRaw = d.integer(forKey: "ChartHistorySeconds")
+        let chartCapacity = chartRaw <= 0 ? 300 : max(15, min(3600, chartRaw))
+        renderer = HistoryRenderer(iconCapacity: dockCapacity,
+                                   chartCapacity: chartCapacity,
+                                   numP: cpu.numP, numE: cpu.numE,
                                    hasBattery: battery.hasBattery,
                                    colors: ChartColors.load())
-        renderer.showGPU = Self.boolDefault("ShowGPU", default: true)
-        renderer.showBattery = Self.boolDefault("ShowBattery", default: false)
-        renderer.showMemory = Self.boolDefault("ShowMemory", default: false)
-        renderer.showDisk = Self.boolDefault("ShowDisk", default: false)
+        renderer.iconTraces = Self.loadTraces(key: "DockTraces")
+        renderer.chartTraces = Self.loadTraces(key: "ChartTraces")
+        UserDefaults.standard.set(true, forKey: "MigratedCPUTrace")
 
-        NSLog("topology: P=\(cpu.numP) E=\(cpu.numE), history=\(capacity)s")
+        NSLog("topology: P=\(cpu.numP) E=\(cpu.numE), dock=\(dockCapacity)s chart=\(chartCapacity)s")
         _ = cpu.sample()
         NSApp.applicationIconImage = renderer.render()
         NSApp.mainMenu = buildMainMenu()
@@ -118,7 +133,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chart?.window?.makeKeyAndOrderFront(nil)
         chart?.refresh(cpu: lastCPU, gpu: lastGPU, battery: lastBatteryInfo,
                        memory: lastMemory,
-                       diskRead: lastDiskRead, diskWrite: lastDiskWrite)
+                       diskRead: lastDiskRead, diskWrite: lastDiskWrite,
+                       netRx: network.totals.rxPerSec, netTx: network.totals.txPerSec,
+                       swapUsed: SwapUsage.current().used)
         // Populate processes immediately rather than waiting up to a full
         // refresh interval. Reset the sampler if the window was closed so
         // CPU% / disk / power don't average over the time we were idle.
@@ -185,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(e)
         self.eItem = e
 
-        if renderer.showGPU {
+        if renderer.iconTraces.contains(.gpu) {
             let g = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             g.isEnabled = false
             menu.addItem(g)
@@ -194,7 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.gItem = nil
         }
 
-        if battery.hasBattery, renderer.showBattery {
+        if battery.hasBattery, renderer.iconTraces.contains(.battery) {
             let b = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             b.isEnabled = false
             menu.addItem(b)
@@ -203,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.bItem = nil
         }
 
-        if renderer.showMemory {
+        if renderer.iconTraces.contains(.memory) {
             let m = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             m.isEnabled = false
             menu.addItem(m)
@@ -212,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.mItem = nil
         }
 
-        if renderer.showDisk {
+        if renderer.iconTraces.contains(.disk) {
             let d = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             d.isEnabled = false
             menu.addItem(d)
@@ -223,11 +240,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let durationParent = NSMenuItem(title: "History duration",
+        let durationParent = NSMenuItem(title: "Dock Icon History",
                                         action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.autoenablesItems = false
-        for d in durations {
+        for d in Self.durations {
             let item = NSMenuItem(title: d.label,
                                   action: #selector(setDurationFromMenu(_:)),
                                   keyEquivalent: "")
@@ -268,7 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let w = Self.bytesFormatter.string(fromByteCount: Int64(lastDiskWrite))
         dItem?.title = "Disk: R \(r)/s · W \(w)/s"
 
-        let current = renderer?.capacity ?? 0
+        let current = renderer?.iconCapacity ?? 0
         if let submenu = durationSubmenu {
             for item in submenu.items {
                 item.state = (item.tag == current) ? .on : .off
@@ -276,34 +293,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func setDurationFromMenu(_ sender: NSMenuItem) {
-        applyDuration(sender.tag)
+    @objc func setDurationFromMenu(_ sender: NSMenuItem) {
+        applyDockDuration(sender.tag)
     }
 
     @objc func showPreferences(_ sender: Any?) {
         if prefs == nil {
             prefs = PreferencesWindowController(
-                durations: durations,
-                currentDuration: renderer.capacity,
                 colors: renderer.colors,
                 hasBattery: battery.hasBattery,
-                showGPU: renderer.showGPU,
-                showBattery: renderer.showBattery,
-                showMemory: renderer.showMemory,
-                showDisk: renderer.showDisk,
+                iconTraces: renderer.iconTraces,
+                chartTraces: renderer.chartTraces,
                 drainThreshold: Self.intDefault("BadgeThresholdWatts", default: 20),
-                autoUpdate: updaterController.updater.automaticallyChecksForUpdates,
-                onDurationChange: { [weak self] s in self?.applyDuration(s) },
+
                 onColorsChange: { [weak self] c in self?.applyColors(c) },
-                onShowGPUChange: { [weak self] b in self?.applyShowGPU(b) },
-                onShowBatteryChange: { [weak self] b in self?.applyShowBattery(b) },
-                onShowMemoryChange: { [weak self] b in self?.applyShowMemory(b) },
-                onShowDiskChange: { [weak self] b in self?.applyShowDisk(b) },
-                onThresholdChange: { [weak self] v in self?.applyThreshold(v) },
-                onAutoUpdateChange: { [weak self] b in self?.applyAutoUpdate(b) }
+                onTracesChange: { [weak self] surface, traces in
+                    self?.applyTraces(surface: surface, traces: traces)
+                },
+                onThresholdChange: { [weak self] v in self?.applyThreshold(v) }
             )
         } else {
-            prefs?.sync(currentDuration: renderer.capacity)
             prefs?.sync(colors: renderer.colors)
         }
         NSApp.activate()
@@ -317,6 +326,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func intDefault(_ key: String, default fallback: Int) -> Int {
         UserDefaults.standard.object(forKey: key) as? Int ?? fallback
+    }
+
+    @objc private func toggleAutoUpdateMenu(_ sender: NSMenuItem) {
+        let on = sender.state != .on
+        sender.state = on ? .on : .off
+        applyAutoUpdate(on)
     }
 
     private func applyAutoUpdate(_ on: Bool) {
@@ -369,32 +384,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return "\(m / 60)h \(m % 60)m"
     }
 
-    private func applyShowGPU(_ on: Bool) {
-        renderer.showGPU = on
-        UserDefaults.standard.set(on, forKey: "ShowGPU")
-        dockMenu = nil  // rebuild on next open
-        NSApp.applicationIconImage = renderer.render()
+    private func applyTraces(surface: TraceSurface, traces: Set<ChartTrace>) {
+        let arr = traces.map(\.rawValue).sorted()
+        switch surface {
+        case .dock:
+            renderer.iconTraces = traces
+            UserDefaults.standard.set(arr, forKey: "DockTraces")
+            dockMenu = nil
+            NSApp.applicationIconImage = renderer.render()
+        case .chart:
+            renderer.chartTraces = traces
+            UserDefaults.standard.set(arr, forKey: "ChartTraces")
+            chart?.chartView.needsDisplay = true
+        }
     }
 
-    private func applyShowBattery(_ on: Bool) {
-        renderer.showBattery = on
-        UserDefaults.standard.set(on, forKey: "ShowBattery")
-        dockMenu = nil
-        NSApp.applicationIconImage = renderer.render()
-    }
-
-    private func applyShowMemory(_ on: Bool) {
-        renderer.showMemory = on
-        UserDefaults.standard.set(on, forKey: "ShowMemory")
-        dockMenu = nil
-        NSApp.applicationIconImage = renderer.render()
-    }
-
-    private func applyShowDisk(_ on: Bool) {
-        renderer.showDisk = on
-        UserDefaults.standard.set(on, forKey: "ShowDisk")
-        dockMenu = nil
-        NSApp.applicationIconImage = renderer.render()
+    /// Per-surface trace set, migrating the pre-split ShowX bools the first
+    /// time (both surfaces inherit the old single configuration).
+    private static func loadTraces(key: String) -> Set<ChartTrace> {
+        if let arr = UserDefaults.standard.stringArray(forKey: key) {
+            var t = Set(arr.compactMap(ChartTrace.init(rawValue:)))
+            // Arrays persisted before CPU became selectable imply it was on;
+            // write the migrated array back so the next launch doesn't
+            // mistake it for a deliberate CPU-off choice.
+            if !arr.contains("cpu"), !UserDefaults.standard.bool(forKey: "MigratedCPUTrace") {
+                t.insert(.cpu)
+                UserDefaults.standard.set(t.map(\.rawValue).sorted(), forKey: key)
+            }
+            return t
+        }
+        var t: Set<ChartTrace> = [.cpu]
+        if boolDefault("ShowGPU", default: true) { t.insert(.gpu) }
+        if boolDefault("ShowBattery", default: false) { t.insert(.battery) }
+        if boolDefault("ShowMemory", default: false) { t.insert(.memory) }
+        if boolDefault("ShowDisk", default: false) { t.insert(.disk) }
+        if boolDefault("ShowNetwork", default: false) { t.insert(.network) }
+        return t
     }
 
     private func applyColors(_ c: ChartColors) {
@@ -403,13 +428,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.applicationIconImage = renderer.render()
     }
 
-    private func applyDuration(_ seconds: Int) {
+    private func applyDockDuration(_ seconds: Int) {
         guard seconds > 0 else { return }
         let clamped = max(15, min(600, seconds))
-        UserDefaults.standard.set(clamped, forKey: "HistorySeconds")
-        renderer.resize(capacity: clamped)
+        UserDefaults.standard.set(clamped, forKey: "DockHistorySeconds")
+        renderer.resizeIcon(capacity: clamped)
         NSApp.applicationIconImage = renderer.render()
-        prefs?.sync(currentDuration: clamped)
+    }
+
+    private func applyChartDuration(_ seconds: Int) {
+        guard seconds > 0 else { return }
+        let clamped = max(15, min(3600, seconds))
+        UserDefaults.standard.set(clamped, forKey: "ChartHistorySeconds")
+        renderer.resizeChart(capacity: clamped)
+        chart?.chartView.needsDisplay = true
+    }
+
+    @objc func setChartDurationFromMenu(_ sender: NSMenuItem) {
+        applyChartDuration(sender.tag)
     }
 
     private func tick() {
@@ -424,12 +460,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastMemory = m
         lastDiskRead = dr
         lastDiskWrite = dw
+        // Network history needs nettop samples even when the process view
+        // isn't open; only worth the (async, ~10 ms) cost when the lines are
+        // on. kick() drops overlapping requests itself.
+        if renderer.iconTraces.contains(.network) || renderer.chartTraces.contains(.network) {
+            network.kick()
+        }
+        let netTotals = network.totals
+        let swap = SwapUsage.current()
+        let swapFraction = swap.total > 0 ? swap.used / swap.total : 0
         renderer.append(cpu: f, gpu: g, battery: bi.percent, memory: m,
-                        diskRead: dr, diskWrite: dw)
+                        diskRead: dr, diskWrite: dw,
+                        netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec,
+                        swap: swapFraction)
         NSApp.applicationIconImage = renderer.render()
         updateDockBadge(bi)
         chart?.refresh(cpu: f, gpu: g, battery: bi, memory: m,
-                       diskRead: dr, diskWrite: dw)
+                       diskRead: dr, diskWrite: dw,
+                       netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec,
+                       swapUsed: swap.used)
 
         // Only pay the per-process sampling cost when someone is looking,
         // and only at the user-chosen interval (default 2s).
@@ -437,7 +486,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pushSystemStats()
             processTickCount += 1
             if processTickCount >= processIntervalSeconds {
-                chart?.processList.setSnapshots(processes.sample())
+                network.kick()   // async; merges whatever sample completed last
+                var snaps = processes.sample()
+                let sleepPids = SleepAssertions.pids()
+                for i in snaps.indices {
+                    snaps[i].preventsSleep = sleepPids.contains(snaps[i].pid)
+                    guard let n = network.latest[snaps[i].pid] else { continue }
+                    snaps[i].netRxBytesPerSec = n.rxPerSec
+                    snaps[i].netTxBytesPerSec = n.txPerSec
+                    snaps[i].netRxTotal = n.rxTotal
+                    snaps[i].netTxTotal = n.txTotal
+                    snaps[i].netRxPackets = n.rxPackets
+                    snaps[i].netTxPackets = n.txPackets
+                }
+                chart?.processList.setSnapshots(snaps)
                 processTickCount = 0
             }
         }
@@ -464,7 +526,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             batteryCharging: b.isCharging, batteryExternal: b.externalConnected,
             batteryMinutesToFull: b.minutesToFull,
             batteryMinutesToEmpty: b.minutesToEmpty,
-            batteryCapacityWh: b.capacityWh))
+            batteryCapacityWh: b.capacityWh,
+            netRxPerSec: network.totals.rxPerSec,
+            netTxPerSec: network.totals.txPerSec,
+            swapUsedBytes: SwapUsage.current().used))
     }
 
     private func buildMainMenu() -> NSMenu {
@@ -487,6 +552,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         updateItem.target = updaterController
         appMenu.addItem(updateItem)
+        let autoItem = NSMenuItem(
+            title: "Automatically Check for Updates",
+            action: #selector(toggleAutoUpdateMenu(_:)),
+            keyEquivalent: ""
+        )
+        autoItem.target = self
+        autoItem.state = updaterController.updater.automaticallyChecksForUpdates ? .on : .off
+        appMenu.addItem(autoItem)
         appMenu.addItem(.separator())
         let chartItem = NSMenuItem(
             title: "Chart",
@@ -502,6 +575,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         procItem.target = self
         appMenu.addItem(procItem)
+        let findItem = NSMenuItem(
+            title: "Filter Processes…",
+            action: #selector(ChartWindowController.focusSearch(_:)),
+            keyEquivalent: "f"
+        )
+        appMenu.addItem(findItem)   // nil target: resolves via responder chain
         let prefsItem = NSMenuItem(
             title: "Preferences…",
             action: #selector(showPreferences(_:)),

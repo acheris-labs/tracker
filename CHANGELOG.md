@@ -11,6 +11,65 @@ auto-update prompt.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-12
+
+### Added
+- **Network tab.** Per-process Sent/s, Rcvd/s, lifetime Sent/Rcvd Bytes, and
+  Sent/Rcvd Packets (sampled via `nettop`; Apple offers no public per-process
+  network API), with an Activity-Monitor-style footer: colored rates, a
+  mirrored DATA graph, and data received/sent totals.
+- **Per-process inspector.** Double-click a row (or the ⓘ toolbar button) for
+  a live panel: identity block (executable path, parent process, user, kind,
+  % CPU, preventing sleep) and Memory · Statistics · Open Files & Ports tabs,
+  plus a Quit button. Open Files & Ports lists real vnode paths and socket
+  kinds via libproc. Multiple inspectors can be open; an exited process is
+  flagged in the subtitle.
+- **Network and Swap chart traces.** Network Rcvd/Sent lines (off by
+  default) and a Swap line (used ÷ total, on the percentage axis). Swap Used
+  also appears in the Memory tab footer and the chart legend.
+- **Preventing Sleep** column on the Energy tab (public
+  IOPMCopyAssertionsByProcess — the one AM column that didn't need private
+  API).
+- **Legend hover highlighting.** Hover a legend chip to spotlight that series
+  in the chart; everything else dims to a ghost.
+- **Process scopes.** All / My / System Processes in the toolbar's "…" menu,
+  with the window subtitle tracking the choice.
+- **Per-surface trace selection.** The dock icon and the chart each choose
+  their own traces (Preferences shows one table: trace · colors · Dock ·
+  Chart). CPU is selectable like everything else.
+- **Independent histories.** The dock icon keeps a short "right now" window
+  (default 30 s) while the chart can show up to an hour ("…" › Chart
+  History); one shared sample store means switching loses nothing.
+- Quality of life: windows remember size/position, ⌘F focuses search,
+  Reveal in Finder / Copy Path on right-click, per-tab column visibility and
+  widths persist, all columns user-resizable, color wells show their metric
+  on hover.
+
+### Changed
+- **Activity-Monitor look and feel throughout.** Native unified toolbar
+  (quit/inspect buttons, "…" menu, centered tab selector, collapsing
+  search); tables on system backgrounds with 24pt rows, AM column titles and
+  order, Process Name flexing to fill the window; footers as boxed panes
+  with live graphs (CPU LOAD, MEMORY USED, ENERGY IMPACT/BATTERY, disk IO).
+  The Chart tab and its legend adopt the same system-native styling.
+- **Shared logarithmic bytes/sec axis.** Disk and network lines share one
+  log-scaled right axis capped at the highest currently-shown trace, so a
+  200 MB/s disk burst and a 20 MB/s download stay legible together.
+- **Hue-grouped palette.** Cool hues = inbound, warm = outbound; saturated =
+  disk, pale = network; battery is yellow. All overridable per-color.
+- Preferences slimmed to the trace table, drain-alert slider, and Reset
+  Colors; auto-update toggling moved to the app menu, dock-icon history to
+  the dock menu.
+
+### Fixed
+- **The battery line now actually draws.** It was stored and toggleable but
+  never rendered, on either the chart or the dock icon.
+- **"All processes" really means all.** Processes whose stats can't be read
+  (other users') were silently dropped; they now appear with identity-only
+  rows, taking the list from ~530 to ~870 on a typical system.
+- Process tables no longer flicker on refresh: cells are reused, column
+  widths no longer re-fit every tick, and the selection survives reloads.
+
 ## [0.2.8] - 2026-07-24
 
 ### Fixed
@@ -118,7 +177,8 @@ auto-update prompt.
 - Keyboard shortcuts (⌘0 chart, ⌘, preferences, ⌘W close, ⌘H hide, ⌘Q quit).
 - CI build workflow and a tag-driven release workflow.
 
-[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/acheris-labs/tracker/compare/v0.2.8...v0.3.0
 [0.2.8]: https://github.com/acheris-labs/tracker/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/acheris-labs/tracker/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/acheris-labs/tracker/compare/v0.2.5...v0.2.6
