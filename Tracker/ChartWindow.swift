@@ -36,6 +36,15 @@ final class ChartView: NSView {
     override var wantsUpdateLayer: Bool { false }
 
     private let tooltip = ChartTooltipView()
+    /// Shown while the hover freeze is in effect, so a chart that has stopped
+    /// moving doesn't read as a stalled app.
+    private let pausedLabel: NSTextField = {
+        let t = NSTextField(labelWithString: "Paused")
+        t.font = .systemFont(ofSize: 9, weight: .semibold)
+        t.textColor = .secondaryLabelColor
+        t.isHidden = true
+        return t
+    }()
     /// Last cursor position, kept so the tooltip can be recomputed as samples
     /// scroll left underneath a stationary pointer.
     private var lastMouse: NSPoint?
@@ -66,6 +75,14 @@ final class ChartView: NSView {
 
     // MARK: Hover tooltip
 
+    override func layout() {
+        super.layout()
+        if pausedLabel.superview == nil { addSubview(pausedLabel) }
+        pausedLabel.sizeToFit()
+        pausedLabel.setFrameOrigin(NSPoint(x: bounds.minX + 8,
+                                           y: bounds.maxY - pausedLabel.frame.height - 6))
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
@@ -75,6 +92,14 @@ final class ChartView: NSView {
             owner: self, userInfo: nil))
     }
 
+    override func mouseEntered(with event: NSEvent) {
+        // Hold the history still while the cursor is over the chart: at 1 Hz
+        // the sample you're pointing at slides out from under you otherwise.
+        renderer?.freezeChart(true)
+        pausedLabel.isHidden = false
+        mouseMoved(with: event)
+    }
+
     override func mouseMoved(with event: NSEvent) {
         lastMouse = convert(event.locationInWindow, from: nil)
         updateTooltip()
@@ -82,7 +107,10 @@ final class ChartView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         lastMouse = nil
+        renderer?.freezeChart(false)
+        pausedLabel.isHidden = true
         updateTooltip()
+        needsDisplay = true
     }
 
     /// Resolve the cursor to a series and show its reading. Called on mouse

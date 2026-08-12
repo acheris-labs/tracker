@@ -298,17 +298,45 @@ final class HistoryRenderer {
                                     diskRead: diskRead, diskWrite: diskWrite,
                                     netRx: netRx, netTx: netTx, swap: swap)
         head = (head + 1) % Self.maxStorage
+        totalAppended += 1
         if count < Self.maxStorage { count += 1 }
     }
 
+    /// Samples appended since launch — the clock the chart's freeze is
+    /// measured against (`count` saturates once storage is full).
+    private var totalAppended: Int = 0
+    /// While set, the chart window renders the history as it stood at this
+    /// sample count, so a hovered point doesn't crawl out from under the
+    /// cursor. The dock icon ignores it and keeps scrolling.
+    private var frozenAt: Int?
+
+    /// Freeze/unfreeze the chart's view of the history (`freezeChart(false)`
+    /// snaps back to live).
+    func freezeChart(_ on: Bool) {
+        frozenAt = on ? (frozenAt ?? totalAppended) : nil
+    }
+
+    var isChartFrozen: Bool { frozenAt != nil }
+
+    /// Whether the surface being drawn is the chart window; set on entry to
+    /// draw()/hitTest(), like `activeWindow`.
+    private var chartSurface = false
+
+    /// How many samples behind live the current surface is drawing.
+    private func lag() -> Int {
+        // Only the chart freezes; the dock icon always draws the newest data.
+        guard chartSurface, let frozen = frozenAt else { return 0 }
+        return max(0, min(totalAppended - frozen, Self.maxStorage - 1))
+    }
+
     private func visibleCount() -> Int {
-        return min(count, activeWindow)
+        return max(0, min(count - lag(), activeWindow))
     }
 
     /// Index in `frames` for the i-th visible sample (0 = oldest visible).
     private func visibleIndex(_ i: Int) -> Int {
         let visible = visibleCount()
-        return (head - visible + i + Self.maxStorage * 2) % Self.maxStorage
+        return (head - lag() - visible + i + Self.maxStorage * 2) % Self.maxStorage
     }
 
     /// Bottom of the shared logarithmic bytes/sec scale — rates at or below
@@ -320,6 +348,7 @@ final class HistoryRenderer {
     /// 1 MiB/s. Log lets wildly different families share one honest axis.
     func byteScaleMax() -> Double {
         activeWindow = chartCapacity   // the chart's right axis uses this
+        chartSurface = true
         return byteScaleMax(visible: visibleCount(), traces: chartTraces)
     }
 
@@ -348,7 +377,9 @@ final class HistoryRenderer {
     }
 
     /// How close (in points) the cursor has to be to a line to hover it.
-    private static let hitTolerance: CGFloat = 6
+    /// Generous on purpose: these are 1–2.5pt splines, and anything tighter
+    /// makes the reading a game of skill.
+    private static let hitTolerance: CGFloat = 12
     /// The distance credited to being inside a CPU band. Non-zero so a line
     /// crossing the stack still wins when the cursor is right on it.
     private static let bandHitDistance: CGFloat = 3
@@ -358,6 +389,7 @@ final class HistoryRenderer {
     /// the same geometry as `draw`, for the chart window's window and traces.
     func hitTest(at p: NSPoint, in rect: NSRect, light: Bool) -> ChartHit? {
         activeWindow = chartCapacity
+        chartSurface = true
         let visible = visibleCount()
         guard visible > 1, rect.width > 0, rect.height > 0 else { return nil }
 
@@ -486,6 +518,7 @@ final class HistoryRenderer {
     func draw(in rect: NSRect, smoothed: Bool = false, light: Bool = false) {
         // smoothed == the chart window; crisp == the dock icon.
         activeWindow = smoothed ? chartCapacity : iconCapacity
+        chartSurface = smoothed
         lightMode = light
         let traces = smoothed ? chartTraces : iconTraces
         let background: NSColor = smoothed
