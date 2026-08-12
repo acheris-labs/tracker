@@ -917,9 +917,10 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     // MARK: helpers
 
-    private static func makeTextCell(identifier: NSUserInterfaceItemIdentifier,
-                                     monospaced: Bool,
-                                     alignment: NSTextAlignment) -> NSTableCellView {
+    /// Shared with ConnectionListView so both tables' rows are identical.
+    static func makeTextCell(identifier: NSUserInterfaceItemIdentifier,
+                             monospaced: Bool,
+                             alignment: NSTextAlignment) -> NSTableCellView {
         let cell = NSTableCellView()
         cell.identifier = identifier
         let label = NSTextField(labelWithString: "")

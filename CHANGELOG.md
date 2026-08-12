@@ -12,6 +12,15 @@ auto-update prompt.
 ## [Unreleased]
 
 ### Added
+- **Connections tab in the per-process inspector.** Every TCP/UDP socket the
+  process holds: protocol, local port, remote host, remote port and TCP state,
+  sortable, refreshed on the existing tick. Remote addresses are resolved to
+  their reverse-DNS names in the background where they have one (many don't —
+  Apple, Cloudflare and Fastly ranges typically have no PTR), falling back to
+  the raw IP; the full name, address and local endpoint are on the row's
+  tooltip. Processes belonging to another user say so rather than showing an
+  empty list — their sockets aren't readable without root, and now the check
+  happens up front instead of by failing.
 - **Chart hover readouts.** Hovering a line (or a CPU band) in the Chart view
   spotlights it and shows a small panel with the series, its value at that
   moment, and the time it was sampled. Hovering empty space shows nothing —
