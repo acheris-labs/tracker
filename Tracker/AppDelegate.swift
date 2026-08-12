@@ -298,24 +298,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showPreferences(_ sender: Any?) {
         if prefs == nil {
             prefs = PreferencesWindowController(
-                durations: Self.durations,
-                currentDuration: renderer.iconCapacity,
                 colors: renderer.colors,
                 hasBattery: battery.hasBattery,
                 iconTraces: renderer.iconTraces,
                 chartTraces: renderer.chartTraces,
                 drainThreshold: Self.intDefault("BadgeThresholdWatts", default: 20),
-                autoUpdate: updaterController.updater.automaticallyChecksForUpdates,
-                onDurationChange: { [weak self] s in self?.applyDockDuration(s) },
+
                 onColorsChange: { [weak self] c in self?.applyColors(c) },
                 onTracesChange: { [weak self] surface, traces in
                     self?.applyTraces(surface: surface, traces: traces)
                 },
-                onThresholdChange: { [weak self] v in self?.applyThreshold(v) },
-                onAutoUpdateChange: { [weak self] b in self?.applyAutoUpdate(b) }
+                onThresholdChange: { [weak self] v in self?.applyThreshold(v) }
             )
         } else {
-            prefs?.sync(currentDuration: renderer.iconCapacity)
             prefs?.sync(colors: renderer.colors)
         }
         NSApp.activate()
@@ -329,6 +324,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func intDefault(_ key: String, default fallback: Int) -> Int {
         UserDefaults.standard.object(forKey: key) as? Int ?? fallback
+    }
+
+    @objc private func toggleAutoUpdateMenu(_ sender: NSMenuItem) {
+        let on = sender.state != .on
+        sender.state = on ? .on : .off
+        applyAutoUpdate(on)
     }
 
     private func applyAutoUpdate(_ on: Bool) {
@@ -423,7 +424,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(clamped, forKey: "DockHistorySeconds")
         renderer.resizeIcon(capacity: clamped)
         NSApp.applicationIconImage = renderer.render()
-        prefs?.sync(currentDuration: clamped)
     }
 
     private func applyChartDuration(_ seconds: Int) {
@@ -537,6 +537,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         updateItem.target = updaterController
         appMenu.addItem(updateItem)
+        let autoItem = NSMenuItem(
+            title: "Automatically Check for Updates",
+            action: #selector(toggleAutoUpdateMenu(_:)),
+            keyEquivalent: ""
+        )
+        autoItem.target = self
+        autoItem.state = updaterController.updater.automaticallyChecksForUpdates ? .on : .off
+        appMenu.addItem(autoItem)
         appMenu.addItem(.separator())
         let chartItem = NSMenuItem(
             title: "Chart",
