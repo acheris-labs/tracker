@@ -4,11 +4,9 @@ final class PreferencesWindowController: NSWindowController {
     private let durations: [(label: String, seconds: Int)]
     private let onDurationChange: (Int) -> Void
     private let onColorsChange: (ChartColors) -> Void
-    private let onShowGPUChange: (Bool) -> Void
-    private let onShowBatteryChange: (Bool) -> Void
-    private let onShowMemoryChange: (Bool) -> Void
-    private let onShowDiskChange: (Bool) -> Void
-    private let onShowNetworkChange: (Bool) -> Void
+    private let onTracesChange: (TraceSurface, Set<ChartTrace>) -> Void
+    private var iconTraces: Set<ChartTrace>
+    private var chartTraces: Set<ChartTrace>
     private let onThresholdChange: (Int) -> Void
     private let onAutoUpdateChange: (Bool) -> Void
     private weak var thresholdLabel: NSTextField?
@@ -25,31 +23,22 @@ final class PreferencesWindowController: NSWindowController {
          currentDuration: Int,
          colors: ChartColors,
          hasBattery: Bool,
-         showGPU: Bool,
-         showBattery: Bool,
-         showMemory: Bool,
-         showDisk: Bool,
-         showNetwork: Bool,
+         iconTraces: Set<ChartTrace>,
+         chartTraces: Set<ChartTrace>,
          drainThreshold: Int,
          autoUpdate: Bool,
          onDurationChange: @escaping (Int) -> Void,
          onColorsChange: @escaping (ChartColors) -> Void,
-         onShowGPUChange: @escaping (Bool) -> Void,
-         onShowBatteryChange: @escaping (Bool) -> Void,
-         onShowMemoryChange: @escaping (Bool) -> Void,
-         onShowDiskChange: @escaping (Bool) -> Void,
-         onShowNetworkChange: @escaping (Bool) -> Void,
+         onTracesChange: @escaping (TraceSurface, Set<ChartTrace>) -> Void,
          onThresholdChange: @escaping (Int) -> Void,
          onAutoUpdateChange: @escaping (Bool) -> Void) {
         self.durations = durations
         self.colors = colors
         self.onDurationChange = onDurationChange
         self.onColorsChange = onColorsChange
-        self.onShowGPUChange = onShowGPUChange
-        self.onShowBatteryChange = onShowBatteryChange
-        self.onShowMemoryChange = onShowMemoryChange
-        self.onShowDiskChange = onShowDiskChange
-        self.onShowNetworkChange = onShowNetworkChange
+        self.onTracesChange = onTracesChange
+        self.iconTraces = iconTraces
+        self.chartTraces = chartTraces
         self.onThresholdChange = onThresholdChange
         self.onAutoUpdateChange = onAutoUpdateChange
         self.initialThreshold = drainThreshold
@@ -98,30 +87,11 @@ final class PreferencesWindowController: NSWindowController {
         select(seconds: currentDuration)
         grid.addRow(with: [Self.label("Dock icon history:"), popup])
 
-        // Show/hide overlays
-        let gpuCheck = NSButton(checkboxWithTitle: "Show GPU",
-                                target: self, action: #selector(toggleShowGPU(_:)))
-        gpuCheck.state = showGPU ? .on : .off
-        grid.addRow(with: [Self.label("Display:"), gpuCheck])
-        if hasBattery {
-            let batCheck = NSButton(checkboxWithTitle: "Show Battery",
-                                    target: self, action: #selector(toggleShowBattery(_:)))
-            batCheck.state = showBattery ? .on : .off
-            grid.addRow(with: [Self.label(""), batCheck])
-        }
-        let memCheck = NSButton(checkboxWithTitle: "Show Memory",
-                                target: self, action: #selector(toggleShowMemory(_:)))
-        memCheck.state = showMemory ? .on : .off
-        grid.addRow(with: [Self.label(""), memCheck])
-
-        let diskCheck = NSButton(checkboxWithTitle: "Show Disk I/O",
-                                 target: self, action: #selector(toggleShowDisk(_:)))
-        diskCheck.state = showDisk ? .on : .off
-        let netCheck = NSButton(checkboxWithTitle: "Show Network",
-                                target: self, action: #selector(toggleShowNetwork(_:)))
-        netCheck.state = showNetwork ? .on : .off
-        grid.addRow(with: [Self.label(""), diskCheck])
-        grid.addRow(with: [Self.label(""), netCheck])
+        // Per-surface trace toggles: dock icon vs chart window.
+        addTraceRows(grid: grid, title: "Dock icon shows:", surface: .dock,
+                     traces: iconTraces, hasBattery: hasBattery)
+        addTraceRows(grid: grid, title: "Chart shows:", surface: .chart,
+                     traces: chartTraces, hasBattery: hasBattery)
 
         let autoUpdateCheck = NSButton(checkboxWithTitle: "Check for updates automatically",
                                        target: self, action: #selector(toggleAutoUpdate(_:)))
@@ -230,24 +200,36 @@ final class PreferencesWindowController: NSWindowController {
         onColorsChange(colors)
     }
 
-    @objc private func toggleShowGPU(_ sender: NSButton) {
-        onShowGPUChange(sender.state == .on)
+    private func addTraceRows(grid: NSGridView, title: String,
+                              surface: TraceSurface,
+                              traces: Set<ChartTrace>, hasBattery: Bool) {
+        var first = true
+        for (i, trace) in ChartTrace.allCases.enumerated() {
+            if trace == .battery, !hasBattery { continue }
+            let check = NSButton(checkboxWithTitle: trace.label, target: self,
+                                 action: #selector(traceToggled(_:)))
+            check.state = traces.contains(trace) ? .on : .off
+            check.tag = (surface == .dock ? 0 : 100) + i
+            grid.addRow(with: [Self.label(first ? title : ""), check])
+            first = false
+        }
     }
 
-    @objc private func toggleShowBattery(_ sender: NSButton) {
-        onShowBatteryChange(sender.state == .on)
-    }
-
-    @objc private func toggleShowMemory(_ sender: NSButton) {
-        onShowMemoryChange(sender.state == .on)
-    }
-
-    @objc private func toggleShowNetwork(_ sender: NSButton) {
-        onShowNetworkChange(sender.state == .on)
-    }
-
-    @objc private func toggleShowDisk(_ sender: NSButton) {
-        onShowDiskChange(sender.state == .on)
+    @objc private func traceToggled(_ sender: NSButton) {
+        let surface: TraceSurface = sender.tag < 100 ? .dock : .chart
+        let idx = sender.tag % 100
+        guard idx < ChartTrace.allCases.count else { return }
+        let trace = ChartTrace.allCases[idx]
+        switch surface {
+        case .dock:
+            if sender.state == .on { iconTraces.insert(trace) }
+            else { iconTraces.remove(trace) }
+            onTracesChange(.dock, iconTraces)
+        case .chart:
+            if sender.state == .on { chartTraces.insert(trace) }
+            else { chartTraces.remove(trace) }
+            onTracesChange(.chart, chartTraces)
+        }
     }
 
     @objc private func toggleAutoUpdate(_ sender: NSButton) {

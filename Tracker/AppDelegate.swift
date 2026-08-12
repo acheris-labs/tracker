@@ -80,11 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    numP: cpu.numP, numE: cpu.numE,
                                    hasBattery: battery.hasBattery,
                                    colors: ChartColors.load())
-        renderer.showGPU = Self.boolDefault("ShowGPU", default: true)
-        renderer.showBattery = Self.boolDefault("ShowBattery", default: false)
-        renderer.showMemory = Self.boolDefault("ShowMemory", default: false)
-        renderer.showDisk = Self.boolDefault("ShowDisk", default: false)
-        renderer.showNetwork = Self.boolDefault("ShowNetwork", default: false)
+        renderer.iconTraces = Self.loadTraces(key: "DockTraces")
+        renderer.chartTraces = Self.loadTraces(key: "ChartTraces")
 
         NSLog("topology: P=\(cpu.numP) E=\(cpu.numE), dock=\(dockCapacity)s chart=\(chartCapacity)s")
         _ = cpu.sample()
@@ -203,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(e)
         self.eItem = e
 
-        if renderer.showGPU {
+        if renderer.iconTraces.contains(.gpu) {
             let g = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             g.isEnabled = false
             menu.addItem(g)
@@ -212,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.gItem = nil
         }
 
-        if battery.hasBattery, renderer.showBattery {
+        if battery.hasBattery, renderer.iconTraces.contains(.battery) {
             let b = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             b.isEnabled = false
             menu.addItem(b)
@@ -221,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.bItem = nil
         }
 
-        if renderer.showMemory {
+        if renderer.iconTraces.contains(.memory) {
             let m = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             m.isEnabled = false
             menu.addItem(m)
@@ -230,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.mItem = nil
         }
 
-        if renderer.showDisk {
+        if renderer.iconTraces.contains(.disk) {
             let d = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             d.isEnabled = false
             menu.addItem(d)
@@ -305,20 +302,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 currentDuration: renderer.iconCapacity,
                 colors: renderer.colors,
                 hasBattery: battery.hasBattery,
-                showGPU: renderer.showGPU,
-                showBattery: renderer.showBattery,
-                showMemory: renderer.showMemory,
-                showDisk: renderer.showDisk,
-                showNetwork: renderer.showNetwork,
+                iconTraces: renderer.iconTraces,
+                chartTraces: renderer.chartTraces,
                 drainThreshold: Self.intDefault("BadgeThresholdWatts", default: 20),
                 autoUpdate: updaterController.updater.automaticallyChecksForUpdates,
                 onDurationChange: { [weak self] s in self?.applyDockDuration(s) },
                 onColorsChange: { [weak self] c in self?.applyColors(c) },
-                onShowGPUChange: { [weak self] b in self?.applyShowGPU(b) },
-                onShowBatteryChange: { [weak self] b in self?.applyShowBattery(b) },
-                onShowMemoryChange: { [weak self] b in self?.applyShowMemory(b) },
-                onShowDiskChange: { [weak self] b in self?.applyShowDisk(b) },
-                onShowNetworkChange: { [weak self] b in self?.applyShowNetwork(b) },
+                onTracesChange: { [weak self] surface, traces in
+                    self?.applyTraces(surface: surface, traces: traces)
+                },
                 onThresholdChange: { [weak self] v in self?.applyThreshold(v) },
                 onAutoUpdateChange: { [weak self] b in self?.applyAutoUpdate(b) }
             )
@@ -389,38 +381,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return "\(m / 60)h \(m % 60)m"
     }
 
-    private func applyShowGPU(_ on: Bool) {
-        renderer.showGPU = on
-        UserDefaults.standard.set(on, forKey: "ShowGPU")
-        dockMenu = nil  // rebuild on next open
-        NSApp.applicationIconImage = renderer.render()
+    private func applyTraces(surface: TraceSurface, traces: Set<ChartTrace>) {
+        let arr = traces.map(\.rawValue).sorted()
+        switch surface {
+        case .dock:
+            renderer.iconTraces = traces
+            UserDefaults.standard.set(arr, forKey: "DockTraces")
+            dockMenu = nil
+            NSApp.applicationIconImage = renderer.render()
+        case .chart:
+            renderer.chartTraces = traces
+            UserDefaults.standard.set(arr, forKey: "ChartTraces")
+            chart?.chartView.needsDisplay = true
+        }
     }
 
-    private func applyShowBattery(_ on: Bool) {
-        renderer.showBattery = on
-        UserDefaults.standard.set(on, forKey: "ShowBattery")
-        dockMenu = nil
-        NSApp.applicationIconImage = renderer.render()
-    }
-
-    private func applyShowMemory(_ on: Bool) {
-        renderer.showMemory = on
-        UserDefaults.standard.set(on, forKey: "ShowMemory")
-        dockMenu = nil
-        NSApp.applicationIconImage = renderer.render()
-    }
-
-    private func applyShowDisk(_ on: Bool) {
-        renderer.showDisk = on
-        UserDefaults.standard.set(on, forKey: "ShowDisk")
-        dockMenu = nil
-        NSApp.applicationIconImage = renderer.render()
-    }
-
-    private func applyShowNetwork(_ on: Bool) {
-        renderer.showNetwork = on
-        UserDefaults.standard.set(on, forKey: "ShowNetwork")
-        NSApp.applicationIconImage = renderer.render()
+    /// Per-surface trace set, migrating the pre-split ShowX bools the first
+    /// time (both surfaces inherit the old single configuration).
+    private static func loadTraces(key: String) -> Set<ChartTrace> {
+        if let arr = UserDefaults.standard.stringArray(forKey: key) {
+            return Set(arr.compactMap(ChartTrace.init(rawValue:)))
+        }
+        var t: Set<ChartTrace> = []
+        if boolDefault("ShowGPU", default: true) { t.insert(.gpu) }
+        if boolDefault("ShowBattery", default: false) { t.insert(.battery) }
+        if boolDefault("ShowMemory", default: false) { t.insert(.memory) }
+        if boolDefault("ShowDisk", default: false) { t.insert(.disk) }
+        if boolDefault("ShowNetwork", default: false) { t.insert(.network) }
+        return t
     }
 
     private func applyColors(_ c: ChartColors) {
@@ -465,7 +453,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Network history needs nettop samples even when the process view
         // isn't open; only worth the (async, ~10 ms) cost when the lines are
         // on. kick() drops overlapping requests itself.
-        if renderer.showNetwork { network.kick() }
+        if renderer.iconTraces.contains(.network) || renderer.chartTraces.contains(.network) {
+            network.kick()
+        }
         let netTotals = network.totals
         renderer.append(cpu: f, gpu: g, battery: bi.percent, memory: m,
                         diskRead: dr, diskWrite: dw,

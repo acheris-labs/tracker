@@ -112,6 +112,23 @@ extension NSColor {
     }
 }
 
+/// The optional overlay traces; the CPU stack is always drawn.
+enum ChartTrace: String, CaseIterable {
+    case gpu, battery, memory, disk, network
+    var label: String {
+        switch self {
+        case .gpu: return "GPU"
+        case .battery: return "Battery"
+        case .memory: return "Memory"
+        case .disk: return "Disk I/O"
+        case .network: return "Network"
+        }
+    }
+}
+
+/// Which surface a trace set customizes.
+enum TraceSurface { case dock, chart }
+
 final class HistoryRenderer {
     // Storage holds up to `maxStorage` recent samples; two independent view
     // windows select how many of the most recent samples each surface draws:
@@ -145,11 +162,10 @@ final class HistoryRenderer {
     private let eWeight: Double
     let hasBattery: Bool
     var colors: ChartColors
-    var showGPU: Bool = true
-    var showBattery: Bool = true
-    var showMemory: Bool = true
-    var showDisk: Bool = true
-    var showNetwork: Bool = true
+    // Independent per-surface trace sets: the dock icon usually wants the
+    // short "right now" essentials, the chart the full picture.
+    var iconTraces: Set<ChartTrace> = [.gpu]
+    var chartTraces: Set<ChartTrace> = [.gpu]
 
     init(iconCapacity: Int, chartCapacity: Int, numP: Int, numE: Int,
          hasBattery: Bool, colors: ChartColors) {
@@ -206,18 +222,18 @@ final class HistoryRenderer {
     /// 1 MiB/s. Log lets wildly different families share one honest axis.
     func byteScaleMax() -> Double {
         activeWindow = chartCapacity   // the chart's right axis uses this
-        return byteScaleMax(visible: visibleCount())
+        return byteScaleMax(visible: visibleCount(), traces: chartTraces)
     }
 
-    private func byteScaleMax(visible: Int) -> Double {
+    private func byteScaleMax(visible: Int, traces: Set<ChartTrace>) -> Double {
         var maxRate: Double = 1_048_576
         for i in 0..<visible {
             let f = frames[visibleIndex(i)]
-            if showDisk {
+            if traces.contains(.disk) {
                 if f.diskRead > maxRate  { maxRate = f.diskRead }
                 if f.diskWrite > maxRate { maxRate = f.diskWrite }
             }
-            if showNetwork {
+            if traces.contains(.network) {
                 if f.netRx > maxRate { maxRate = f.netRx }
                 if f.netTx > maxRate { maxRate = f.netTx }
             }
@@ -265,6 +281,7 @@ final class HistoryRenderer {
               background: NSColor = NSColor(white: 0.04, alpha: 1)) {
         // smoothed == the chart window; crisp == the dock icon.
         activeWindow = smoothed ? chartCapacity : iconCapacity
+        let traces = smoothed ? chartTraces : iconTraces
         background.setFill()
         rect.fill()
 
@@ -300,12 +317,12 @@ final class HistoryRenderer {
         // through), on top in the opaque menu-bar image so it stays visible
         // at high CPU load.
         if visible > 1 {
-            if showBattery, hasBattery {
+            if traces.contains(.battery), hasBattery {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
                          color: colors.battery, smoothed: smoothed) { $0.battery }
             }
-            if showMemory {
+            if traces.contains(.memory) {
                 drawLine(visible: visible, xOffset: xOffset, colW: colW,
                          bandY: inner.minY, bandH: cpuH,
                          color: colors.memory, smoothed: smoothed) { $0.memory }
@@ -313,9 +330,9 @@ final class HistoryRenderer {
             // Disk and network share one LOGARITHMIC bytes/sec scale: linear
             // sharing would let either family's burst flatten the other, and
             // separate scales made same-unit lines incomparable.
-            if showDisk || showNetwork {
-                let maxRate = byteScaleMax(visible: visible)
-                if showNetwork {
+            if traces.contains(.disk) || traces.contains(.network) {
+                let maxRate = byteScaleMax(visible: visible, traces: traces)
+                if traces.contains(.network) {
                     drawLine(visible: visible, xOffset: xOffset, colW: colW,
                              bandY: inner.minY, bandH: cpuH,
                              color: colors.netRx, lineWidth: 1.25, smoothed: smoothed) {
@@ -327,7 +344,7 @@ final class HistoryRenderer {
                         Self.logNorm($0.netTx, maxRate: maxRate)
                     }
                 }
-                if showDisk {
+                if traces.contains(.disk) {
                     drawLine(visible: visible, xOffset: xOffset, colW: colW,
                              bandY: inner.minY, bandH: cpuH,
                              color: colors.diskRead, lineWidth: 1.25, smoothed: smoothed) {
@@ -342,7 +359,7 @@ final class HistoryRenderer {
             }
         }
 
-        if visible > 1, showGPU, smoothed {
+        if visible > 1, traces.contains(.gpu), smoothed {
             drawLine(visible: visible, xOffset: xOffset, colW: colW,
                      bandY: inner.minY, bandH: cpuH,
                      color: colors.gpu, smoothed: true,
@@ -378,7 +395,7 @@ final class HistoryRenderer {
             }
         }
 
-        if visible > 1, showGPU, !smoothed {
+        if visible > 1, traces.contains(.gpu), !smoothed {
             drawLine(visible: visible, xOffset: xOffset, colW: colW,
                      bandY: inner.minY, bandH: cpuH,
                      color: colors.gpu, smoothed: false) { $0.gpu }
