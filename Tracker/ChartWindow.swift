@@ -106,11 +106,38 @@ final class ChartView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        endHover()
+    }
+
+    /// Re-derive the hover from where the cursor actually is. mouseExited is
+    /// not guaranteed: switching apps, the window losing key, or the tab
+    /// changing all leave the pointer "inside" as far as tracking areas are
+    /// concerned, and the chart would stay frozen forever. Called every
+    /// refresh, so the freeze can never outlive the hover by more than a tick.
+    func syncHoverFromCursor() {
+        guard let window, window.isVisible, NSApp.isActive, window.isKeyWindow,
+              !isHiddenOrHasHiddenAncestor else {
+            endHover()
+            return
+        }
+        let p = convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        guard bounds.contains(p) else {
+            endHover()
+            return
+        }
+        lastMouse = p
+        renderer?.freezeChart(true)
+        pausedLabel.isHidden = false
+        updateTooltip()
+    }
+
+    private func endHover() {
+        let wasHovering = lastMouse != nil || renderer?.isChartFrozen == true
         lastMouse = nil
         renderer?.freezeChart(false)
         pausedLabel.isHidden = true
         updateTooltip()
-        needsDisplay = true
+        if wasHovering { needsDisplay = true }
     }
 
     /// Resolve the cursor to a series and show its reading. Called on mouse
@@ -426,7 +453,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
                  memory: Double, diskRead: Double, diskWrite: Double,
                  netRx: Double = 0, netTx: Double = 0, swapUsed: Double = 0) {
         chartView.needsDisplay = true
-        chartView.updateTooltip()   // the sample under a parked cursor moves
+        chartView.syncHoverFromCursor()   // also releases a stuck hover freeze
         updateChips(cpu: cpu, gpu: gpu, battery: battery,
                     memory: memory, diskRead: diskRead, diskWrite: diskWrite,
                     netRx: netRx, netTx: netTx, swapUsed: swapUsed)
