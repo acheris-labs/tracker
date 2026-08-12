@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import IOKit.pwr_mgt
 
 struct ProcessSnapshot {
     let pid: Int32
@@ -25,6 +26,39 @@ struct ProcessSnapshot {
     var netTxBytesPerSec = 0.0
     var netRxTotal = 0.0        // cumulative bytes received
     var netTxTotal = 0.0        // cumulative bytes sent
+    var netRxPackets = 0.0      // cumulative packets received
+    var netTxPackets = 0.0      // cumulative packets sent
+
+    // Merged in from SleepAssertions (Energy tab's "Preventing Sleep").
+    var preventsSleep = false
+}
+
+/// PIDs currently holding power assertions that keep the machine awake —
+/// public IOKit API, same source as `pmset -g assertions`.
+enum SleepAssertions {
+    private static let preventing: Set<String> = [
+        "PreventUserIdleSystemSleep", "PreventUserIdleDisplaySleep",
+        "PreventSystemSleep", "NoIdleSleepAssertion", "NoDisplaySleepAssertion",
+    ]
+
+    static func pids() -> Set<pid_t> {
+        var dict: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&dict) == kIOReturnSuccess,
+              let byPid = dict?.takeRetainedValue() as? [Int: [[String: Any]]] else {
+            return []
+        }
+        var out = Set<pid_t>()
+        for (pid, assertions) in byPid {
+            for a in assertions {
+                if let type = a[kIOPMAssertionTypeKey as String] as? String,
+                   preventing.contains(type) {
+                    out.insert(pid_t(pid))
+                    break
+                }
+            }
+        }
+        return out
+    }
 }
 
 final class ProcessSampler {

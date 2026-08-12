@@ -440,12 +440,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if processTickCount >= processIntervalSeconds {
                 network.kick()   // async; merges whatever sample completed last
                 var snaps = processes.sample()
+                let sleepPids = SleepAssertions.pids()
                 for i in snaps.indices {
+                    snaps[i].preventsSleep = sleepPids.contains(snaps[i].pid)
                     guard let n = network.latest[snaps[i].pid] else { continue }
                     snaps[i].netRxBytesPerSec = n.rxPerSec
                     snaps[i].netTxBytesPerSec = n.txPerSec
                     snaps[i].netRxTotal = n.rxTotal
                     snaps[i].netTxTotal = n.txTotal
+                    snaps[i].netRxPackets = n.rxPackets
+                    snaps[i].netTxPackets = n.txPackets
                 }
                 chart?.processList.setSnapshots(snaps)
                 processTickCount = 0

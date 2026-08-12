@@ -515,6 +515,8 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         } else {
             tabs.selectTabViewItem(at: 0)
         }
+        // AM-style subtitle under the window title on the process tabs.
+        window?.subtitle = onProcess ? "All Processes" : ""
         // Process-only toolbar items hide on the Chart tab (macOS 15+;
         // merely disabled on 14, where NSToolbarItem.isHidden doesn't exist).
         quitItem?.isEnabled = onProcess

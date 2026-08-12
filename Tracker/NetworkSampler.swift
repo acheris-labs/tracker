@@ -11,6 +11,8 @@ final class NetworkSampler {
         var txPerSec = 0.0
         var rxTotal = 0.0   // cumulative bytes received (socket lifetimes)
         var txTotal = 0.0
+        var rxPackets = 0.0
+        var txPackets = 0.0
     }
 
     private let queue = DispatchQueue(label: "net.acheris.tracker.nettop",
@@ -18,7 +20,7 @@ final class NetworkSampler {
     private var inFlight = false
 
     // Queue-confined sampling state.
-    private var prevTotals: [Int32: (rx: Double, tx: Double)] = [:]
+    private var prevTotals: [Int32: Totals] = [:]
     private var prevDate: Date?
 
     /// Latest completed sample — main-thread only.
@@ -50,7 +52,8 @@ final class NetworkSampler {
                 var stats: [Int32: Stats] = [:]
                 for (pid, t) in parsed {
                     var s = Stats(rxPerSec: 0, txPerSec: 0,
-                                  rxTotal: t.rx, txTotal: t.tx)
+                                  rxTotal: t.rx, txTotal: t.tx,
+                                  rxPackets: t.rxPkts, txPackets: t.txPkts)
                     if elapsed > 0.5, let p = self.prevTotals[pid] {
                         s.rxPerSec = max(0, t.rx - p.rx) / elapsed
                         s.txPerSec = max(0, t.tx - p.tx) / elapsed
@@ -64,12 +67,16 @@ final class NetworkSampler {
         }
     }
 
-    /// Run nettop once and parse `name.pid,bytes_in,bytes_out,` lines.
+    struct Totals { var rx = 0.0, tx = 0.0, rxPkts = 0.0, txPkts = 0.0 }
+
+    /// Run nettop once and parse its per-process CSV. Column positions come
+    /// from the header line — nettop reorders -J requests to its own liking.
     /// Returns nil if nettop couldn't run or produced nothing.
-    private static func runNettop() -> [Int32: (rx: Double, tx: Double)]? {
+    private static func runNettop() -> [Int32: Totals]? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/nettop")
-        p.arguments = ["-n", "-P", "-x", "-L", "1", "-J", "bytes_in,bytes_out"]
+        p.arguments = ["-n", "-P", "-x", "-L", "1",
+                       "-J", "bytes_in,bytes_out,packets_in,packets_out"]
         let out = Pipe()
         p.standardOutput = out
         p.standardError = Pipe()
@@ -79,15 +86,27 @@ final class NetworkSampler {
         guard p.terminationStatus == 0,
               let text = String(data: data, encoding: .utf8) else { return nil }
 
-        var totals: [Int32: (rx: Double, tx: Double)] = [:]
-        for line in text.split(separator: "\n").dropFirst() {   // skip header
+        let lines = text.split(separator: "\n")
+        guard let header = lines.first else { return nil }
+        let names = header.split(separator: ",", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard let iRx = names.firstIndex(of: "bytes_in"),
+              let iTx = names.firstIndex(of: "bytes_out") else { return nil }
+        let iRxP = names.firstIndex(of: "packets_in")
+        let iTxP = names.firstIndex(of: "packets_out")
+
+        var totals: [Int32: Totals] = [:]
+        for line in lines.dropFirst() {
             let cols = line.split(separator: ",", omittingEmptySubsequences: false)
-            guard cols.count >= 3 else { continue }
+            guard cols.count > max(iRx, iTx) else { continue }
             // Process names can contain dots; the pid is after the last one.
             guard let dot = cols[0].lastIndex(of: "."),
                   let pid = Int32(cols[0][cols[0].index(after: dot)...]),
-                  let rx = Double(cols[1]), let tx = Double(cols[2]) else { continue }
-            totals[pid] = (rx, tx)
+                  let rx = Double(cols[iRx]), let tx = Double(cols[iTx]) else { continue }
+            var t = Totals(rx: rx, tx: tx)
+            if let i = iRxP, cols.count > i { t.rxPkts = Double(cols[i]) ?? 0 }
+            if let i = iTxP, cols.count > i { t.txPkts = Double(cols[i]) ?? 0 }
+            totals[pid] = t
         }
         return totals.isEmpty ? nil : totals
     }

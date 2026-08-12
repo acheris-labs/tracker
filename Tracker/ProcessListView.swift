@@ -10,9 +10,17 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private var searchText = ""
     private var sortKey: SortKey = .cpu
     private var sortAscending = false
-    /// As declared in buildTable(); selectTab() resets visible columns to
-    /// these so widths can't drift across tab switches.
+    /// As declared in buildTable(); selectTab() applies the user's persisted
+    /// widths for the tab, falling back to these.
     private var defaultWidths: [String: CGFloat] = [:]
+    /// True while the user has dragged the Process Name divider on this tab —
+    /// suspends auto-fill so their width sticks (cleared on tab switch).
+    private var nameManuallySized = false
+    /// Reentrancy guard: programmatic width changes must not count as manual.
+    private var isFittingColumns = false
+    private static func columnWidthsKey(for tab: Tab) -> String {
+        "ProcessColumnWidths.\(tab.rawValue)"
+    }
 
     /// Called when the user changes the refresh interval (seconds).
     var onIntervalChange: ((Int) -> Void)?
@@ -21,12 +29,17 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     var intervalSeconds: Int = 2
 
     static let intervalOptions: [Int] = [1, 2, 3, 5, 10]
-    private static let hiddenColumnsKey = "ProcessColumnsHidden"
+    // Per-tab hidden-column overrides ("ProcessColumnsHidden.<tab>"): user
+    // toggles from the Columns menu survive tab switches and relaunches.
+    private static func hiddenColumnsKey(for tab: Tab) -> String {
+        "ProcessColumnsHidden.\(tab.rawValue)"
+    }
 
     enum SortKey: String {
         case cpu, name, memory, threads, read, write, power, pid, user
         case cpuTime, idle, kind, drain, energy, batt, rtotal, wtotal
         case netrx, nettx, netrxtotal, nettxtotal
+        case netrxpkts, nettxpkts, sleep
     }
 
     /// Activity-Monitor-style category tabs: each selects a column set, a
@@ -37,9 +50,10 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
             switch self {
             case .cpu:     return ["name", "cpu", "cputime", "threads", "idle", "kind", "pid"]
             case .memory:  return ["name", "memory", "threads", "pid", "user"]
-            case .energy:  return ["name", "power", "drain", "energy", "batt", "pid", "user"]
+            case .energy:  return ["name", "power", "drain", "energy", "batt", "sleep", "pid", "user"]
             case .disk:    return ["name", "write", "read", "wtotal", "rtotal", "pid", "user"]
-            case .network: return ["name", "nettx", "netrx", "nettxtotal", "netrxtotal", "pid", "user"]
+            case .network: return ["name", "nettx", "netrx", "nettxtotal", "netrxtotal",
+                                   "nettxpkts", "netrxpkts", "pid", "user"]
             }
         }
         /// Column id (== SortKey rawValue) to sort by when this tab opens.
@@ -154,7 +168,8 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
 
     private func fitNameColumn() {
-        guard let nameCol = table.tableColumn(withIdentifier: .init("name")) else { return }
+        guard !nameManuallySized,
+              let nameCol = table.tableColumn(withIdentifier: .init("name")) else { return }
         let clipW = scroll.contentSize.width
         guard clipW > 0 else { return }
         // Re-tile so column rects reflect the current column set, then measure
@@ -168,7 +183,9 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         // Assume the .inset style pads symmetrically on the trailing side.
         let usedW = table.rect(ofColumn: last).maxX + leadPad
         let target = clipW - (usedW - nameCol.width)
+        isFittingColumns = true
         nameCol.width = max(150, target)
+        isFittingColumns = false
     }
 
     // MARK: tabs + footer
@@ -176,8 +193,11 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private func selectTab(_ tab: Tab) {
         currentTab = tab
         let visible = Set(tab.columns)
+        let userHidden = Set(UserDefaults.standard.stringArray(
+            forKey: Self.hiddenColumnsKey(for: tab)) ?? [])
         for col in table.tableColumns {
-            col.isHidden = !visible.contains(col.identifier.rawValue)
+            let id = col.identifier.rawValue
+            col.isHidden = !visible.contains(id) || userHidden.contains(id)
         }
         // Column widths are re-fit by applyFilterAndSort() below.
         if let key = SortKey(rawValue: tab.sortColumn) {
@@ -190,12 +210,20 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
             table.setIndicatorImage(NSImage(systemSymbolName: "chevron.down",
                                             accessibilityDescription: nil), in: col)
         }
+        nameManuallySized = false
+        let savedWidths = (UserDefaults.standard.dictionary(
+            forKey: Self.columnWidthsKey(for: tab)) as? [String: Double]) ?? [:]
+        isFittingColumns = true
         for col in table.tableColumns where !col.isHidden {
-            if let w = defaultWidths[col.identifier.rawValue],
-               col.identifier.rawValue != "name" {
+            let id = col.identifier.rawValue
+            guard id != "name" else { continue }
+            if let w = savedWidths[id] {
+                col.width = w
+            } else if let w = defaultWidths[id] {
                 col.width = w
             }
         }
+        isFittingColumns = false
         fitNameColumn()
         applyFilterAndSort()
         rebuildFooterPanes(for: tab)
@@ -442,6 +470,12 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
                   alignment: .right)
         addColumn(id: "netrxtotal", title: "Rcvd Bytes", width: 100, key: .netrxtotal,
                   alignment: .right)
+        addColumn(id: "nettxpkts", title: "Sent Packets", width: 104, key: .nettxpkts,
+                  alignment: .right)
+        addColumn(id: "netrxpkts", title: "Rcvd Packets", width: 104, key: .netrxpkts,
+                  alignment: .right)
+        addColumn(id: "sleep",   title: "Preventing Sleep", width: 118, key: .sleep,
+                  alignment: .left)
         addColumn(id: "pid",     title: "PID",    width: 66,  key: .pid,
                   alignment: .right)
         addColumn(id: "user",    title: "User",   width: 96,  key: .user,
@@ -452,34 +486,27 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         // the name width explicitly (on tab switch and in layout()), so no
         // automatic distribution is wanted.
         for col in table.tableColumns {
-            col.resizingMask = col.identifier.rawValue == "name"
-                ? [] : [.userResizingMask]
+            col.resizingMask = [.userResizingMask]
         }
         table.columnAutoresizingStyle = .noColumnAutoresizing
 
         // Column visibility + initial sort are set by selectTab() (see init).
     }
 
-    private func loadColumnVisibility() {
-        let hidden = Set(UserDefaults.standard.stringArray(forKey: Self.hiddenColumnsKey) ?? [])
-        for col in table.tableColumns {
-            col.isHidden = hidden.contains(col.identifier.rawValue)
-        }
-    }
-
     private func persistColumnVisibility() {
+        let tabCols = Set(currentTab.columns)
         let hidden = table.tableColumns
-            .filter(\.isHidden)
+            .filter { $0.isHidden && tabCols.contains($0.identifier.rawValue) }
             .map { $0.identifier.rawValue }
-        UserDefaults.standard.set(hidden, forKey: Self.hiddenColumnsKey)
+        UserDefaults.standard.set(hidden, forKey: Self.hiddenColumnsKey(for: currentTab))
     }
 
-    /// Build a fresh column-visibility menu reflecting current state.
-    /// Exposed so the chart window can show it from a right-click on the
-    /// Processes tab label.
+    /// Column-visibility menu for the CURRENT tab (shown in the toolbar's
+    /// "…" menu). Only that tab's columns are listed; toggles persist per tab.
     func columnSelectorMenu() -> NSMenu {
         let menu = NSMenu()
-        for col in table.tableColumns {
+        for id in currentTab.columns {
+            guard let col = table.tableColumn(withIdentifier: .init(id)) else { continue }
             let item = NSMenuItem(title: col.title,
                                   action: #selector(toggleColumn(_:)),
                                   keyEquivalent: "")
@@ -499,6 +526,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         col.isHidden = !col.isHidden
         sender.state = col.isHidden ? .off : .on
         persistColumnVisibility()
+        fitNameColumn()   // the freed/claimed width goes to Process Name
     }
 
     private func addColumn(id: String, title: String, width: CGFloat,
@@ -698,6 +726,22 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         a.runModal()
     }
 
+    /// User dragged a column divider. Name: remember it and stop auto-fill.
+    /// Others: persist the width for this tab and re-fill Name around it.
+    func tableViewColumnDidResize(_ notification: Notification) {
+        guard !isFittingColumns,
+              let col = notification.userInfo?["NSTableColumn"] as? NSTableColumn else { return }
+        if col.identifier.rawValue == "name" {
+            nameManuallySized = true
+            return
+        }
+        var saved = (UserDefaults.standard.dictionary(
+            forKey: Self.columnWidthsKey(for: currentTab)) as? [String: Double]) ?? [:]
+        saved[col.identifier.rawValue] = col.width
+        UserDefaults.standard.set(saved, forKey: Self.columnWidthsKey(for: currentTab))
+        fitNameColumn()
+    }
+
     // MARK: NSTableViewDataSource
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -754,6 +798,9 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         case "nettx":   return formatRate(snap.netTxBytesPerSec)
         case "netrxtotal": return formatTotal(snap.netRxTotal)
         case "nettxtotal": return formatTotal(snap.netTxTotal)
+        case "netrxpkts": return formatCount(snap.netRxPackets)
+        case "nettxpkts": return formatCount(snap.netTxPackets)
+        case "sleep":   return snap.preventsSleep ? "Yes" : "—"
         case "wtotal":  return formatTotal(snap.diskWriteTotal)
         case "power":   return formatPower(snap.powerWatts)
         case "drain":
@@ -866,6 +913,18 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         return String(format: "%.1f MB", mb)
     }
 
+    /// Whole counts with thousands separators, "—" for zero (AM style).
+    private func formatCount(_ n: Double) -> String {
+        if n < 1 { return "—" }
+        return Self.countFormatter.string(from: NSNumber(value: Int64(n))) ?? "\(Int64(n))"
+    }
+
+    private static let countFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        return f
+    }()
+
     private func formatRate(_ bytesPerSec: Double) -> String {
         if bytesPerSec < 1024 { return "—" }
         return Self.bytesFormatter.string(fromByteCount: Int64(bytesPerSec))
@@ -937,6 +996,17 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         case .nettxtotal:
             return s.sorted { asc ? $0.netTxTotal < $1.netTxTotal
                                   : $0.netTxTotal > $1.netTxTotal }
+        case .netrxpkts:
+            return s.sorted { asc ? $0.netRxPackets < $1.netRxPackets
+                                  : $0.netRxPackets > $1.netRxPackets }
+        case .nettxpkts:
+            return s.sorted { asc ? $0.netTxPackets < $1.netTxPackets
+                                  : $0.netTxPackets > $1.netTxPackets }
+        case .sleep:
+            return s.sorted { a, b in
+                let ai = a.preventsSleep ? 1 : 0, bi = b.preventsSleep ? 1 : 0
+                return asc ? ai < bi : ai > bi
+            }
         case .cpuTime:
             return s.sorted { asc ? $0.cpuTimeSeconds < $1.cpuTimeSeconds
                                   : $0.cpuTimeSeconds > $1.cpuTimeSeconds }
