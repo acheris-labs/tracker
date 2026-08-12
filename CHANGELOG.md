@@ -11,6 +11,8 @@ auto-update prompt.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-12
+
 ### Added
 - **Connections tab.** A new top-level tab listing every connection on the
   machine — process name (with its icon) and PID, protocol, local port, remote
@@ -222,7 +224,8 @@ auto-update prompt.
 - Keyboard shortcuts (⌘0 chart, ⌘, preferences, ⌘W close, ⌘H hide, ⌘Q quit).
 - CI build workflow and a tag-driven release workflow.
 
-[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/acheris-labs/tracker/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/acheris-labs/tracker/compare/v0.2.8...v0.3.0
 [0.2.8]: https://github.com/acheris-labs/tracker/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/acheris-labs/tracker/compare/v0.2.6...v0.2.7
