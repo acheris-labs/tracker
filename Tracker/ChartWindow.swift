@@ -57,11 +57,13 @@ final class LegendChip: NSView {
         dot.layer?.backgroundColor = color.cgColor
         dot.layer?.cornerRadius = 5
 
+        // Same type as the process tabs' footer grids (11pt label /
+        // 11pt monospaced-digit value), so the panes read as one family.
         nameLabel.stringValue = name
-        nameLabel.font = .systemFont(ofSize: 12, weight: .regular)
-        nameLabel.textColor = .secondaryLabelColor
+        nameLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        nameLabel.textColor = .labelColor
 
-        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         valueLabel.textColor = .labelColor
         valueLabel.alignment = .right
 
@@ -236,11 +238,11 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         let sysCol  = Self.legendColumn(title: "System", chips: sysChips)
         let diskCol = Self.legendColumn(title: "Storage", chips: [readChip, writeChip])
 
+        // Centered boxed panes, same rhythm as the process tabs' footers.
         let infoStrip = NSStackView(views: [cpuCol, sysCol, diskCol])
         infoStrip.orientation = .horizontal
         infoStrip.alignment = .top
-        infoStrip.distribution = .equalSpacing
-        infoStrip.spacing = 32
+        infoStrip.spacing = 12
         infoStrip.translatesAutoresizingMaskIntoConstraints = false
 
         // Hairline separator above the info strip
@@ -276,7 +278,8 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             divider.trailingAnchor.constraint(equalTo: bg.trailingAnchor, constant: -pad),
             divider.heightAnchor.constraint(equalToConstant: 1),
 
-            infoStrip.leadingAnchor.constraint(equalTo: bg.leadingAnchor, constant: pad),
+            infoStrip.centerXAnchor.constraint(equalTo: bg.centerXAnchor),
+            infoStrip.leadingAnchor.constraint(greaterThanOrEqualTo: bg.leadingAnchor, constant: pad),
             infoStrip.trailingAnchor.constraint(lessThanOrEqualTo: bg.trailingAnchor, constant: -pad),
             infoStrip.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: pad),
             infoStrip.bottomAnchor.constraint(equalTo: bg.bottomAnchor, constant: -pad),
@@ -536,28 +539,55 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private static func sectionHeader(_ s: String) -> NSTextField {
-        let t = NSTextField(labelWithString: s.uppercased())
-        t.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
-        t.textColor = .secondaryLabelColor
-        // Slight letter-spacing for Apple-style "section caps"
+        let t = NSTextField(labelWithString: "")
+        // Small caps with letter-spacing, matching the footer panes' captions.
+        // Centering must live in the attributed string's paragraph style — a
+        // field-level alignment is overridden by the attributed value.
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
         t.attributedStringValue = NSAttributedString(
             string: s.uppercased(),
             attributes: [
-                .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+                .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .kern: 0.6,
+                .paragraphStyle: style,
             ])
         return t
     }
 
+    /// A legend section as a bordered pane matching the process tabs' footer:
+    /// centered small-caps caption over a hairline, then the chip rows with
+    /// hairline separators between them.
     private static func legendColumn(title: String, chips: [LegendChip]) -> NSView {
+        // Wrapper centers the caption regardless of how the stack stretches it.
         let header = sectionHeader(title)
-        let stack = NSStackView(views: [header] + chips)
+        header.translatesAutoresizingMaskIntoConstraints = false
+        let headerWrap = NSView()
+        headerWrap.translatesAutoresizingMaskIntoConstraints = false
+        headerWrap.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.centerXAnchor.constraint(equalTo: headerWrap.centerXAnchor),
+            header.topAnchor.constraint(equalTo: headerWrap.topAnchor),
+            header.bottomAnchor.constraint(equalTo: headerWrap.bottomAnchor),
+        ])
+        let headerSep = NSBox()
+        headerSep.boxType = .separator
+        var views: [NSView] = [headerWrap, headerSep]
+        for (i, chip) in chips.enumerated() {
+            views.append(chip)
+            if i < chips.count - 1 {
+                let sep = NSBox()
+                sep.boxType = .separator
+                views.append(sep)
+            }
+        }
+        let stack = NSStackView(views: views)
         stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        stack.setCustomSpacing(10, after: header)
-        return stack
+        stack.alignment = .width
+        stack.spacing = 3
+        stack.setCustomSpacing(4, after: headerWrap)
+        return FooterPane(content: stack, minWidth: 210, height: nil)
     }
 
     // MARK: Updates

@@ -3,9 +3,11 @@ import AppKit
 // Activity-Monitor-style footer summary panes: bordered rounded boxes holding
 // either a label/value grid or a small history graph with a caption.
 
-/// One bordered, rounded footer pane.
+/// One bordered, rounded footer pane. `height` nil hugs the content (used by
+/// the Chart tab's legend panes, whose row counts differ).
 final class FooterPane: NSView {
-    init(content: NSView, minWidth: CGFloat = 190) {
+    init(content: NSView, minWidth: CGFloat = 190,
+         height: CGFloat? = Theme.footerPaneHeight) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
@@ -14,14 +16,17 @@ final class FooterPane: NSView {
         layer?.borderColor = NSColor.separatorColor.cgColor
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
-        NSLayoutConstraint.activate([
+        var constraints = [
             content.topAnchor.constraint(equalTo: topAnchor, constant: 5),
             content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
             content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth),
-            heightAnchor.constraint(equalToConstant: Theme.footerPaneHeight),
-        ])
+        ]
+        if let height {
+            constraints.append(heightAnchor.constraint(equalToConstant: height))
+        }
+        NSLayoutConstraint.activate(constraints)
     }
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
