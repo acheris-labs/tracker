@@ -108,11 +108,9 @@ final class ConnectionMapView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        for name in [HostResolver.resolved, GeoResolver.resolved] {
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(lookupsResolved),
-                name: name, object: nil)
-        }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(lookupsResolved),
+            name: HostResolver.resolved, object: nil)
     }
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
@@ -539,8 +537,8 @@ final class ConnectionMapView: NSView {
 
     private func flag(_ node: GraphNode) -> String? {
         guard !node.isPrivate,
-              let code = GeoResolver.shared.countryCode(for: node.address) else { return nil }
-        let glyph = GeoResolver.flag(code)
+              let code = GeoDatabase.countryCode(for: node.address) else { return nil }
+        let glyph = GeoDatabase.flag(code)
         return glyph.isEmpty ? code : glyph
     }
 

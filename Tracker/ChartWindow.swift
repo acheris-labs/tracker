@@ -926,12 +926,13 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
                 menu.addItem(item)
             }
 
-            let geo = NSMenuItem(title: "Look Up Countries",
+            let geo = NSMenuItem(title: "Show Countries",
                                  action: #selector(toggleCountryLookup(_:)),
                                  keyEquivalent: "")
             geo.target = self
-            geo.state = GeoResolver.isEnabled ? .on : .off
-            geo.toolTip = "Asks the regional registry who owns each address."
+            geo.state = GeoDatabase.isEnabled ? .on : .off
+            geo.toolTip = "Which registry holds each address, from a table "
+                + "bundled with the app. Nothing is looked up over the network."
             menu.addItem(geo)
         }
 
@@ -1039,7 +1040,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func toggleCountryLookup(_ sender: NSMenuItem) {
-        GeoResolver.isEnabled.toggle()
+        GeoDatabase.isEnabled.toggle()
     }
 
     @objc private func toggleTrafficScope(_ sender: NSMenuItem) {

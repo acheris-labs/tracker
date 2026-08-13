@@ -23,9 +23,8 @@ auto-update prompt.
   arrowhead points the way the
   connection was opened — worked out from which end holds the ephemeral port,
   or which end's port we're listening on. Public hosts carry their country
-  flag, looked up through `whois` in the background and cached by netblock;
-  LAN and loopback peers show a house instead, since they have no registry
-  country.
+  flag; LAN and loopback peers show a house instead, since they have no
+  registry country.
 - **Map interaction.** Hovering a node names the processes behind it, with
   their icons and pids, the connection count, byte totals and which side
   opened it — and the map holds still while the pointer is over it. Clicking
@@ -37,10 +36,17 @@ auto-update prompt.
   read, and a host can be dialled both ways), so it gets its own switch rather
   than being folded into one of the others.
 - **Country column** in the Connections table, sortable, showing the flag and
-  code for public addresses and a house for anything on this network. It uses
-  the same lookup as the map, so "Look Up Countries" now governs both — it
-  previously only affected the map, which made the menu item look broken from
-  the table.
+  code for public addresses and a house for anything on this network
+  (RFC1918, loopback, and their IPv6 equivalents). It uses the same source as
+  the map, so "Show Countries" governs both.
+- **Countries come from a table bundled with the app**, compiled from the five
+  regional registries' published delegation statistics and refreshed on every
+  release. Flags now appear the instant a row does, and nothing about your
+  connections goes anywhere: the previous approach ran a `whois` per netblock,
+  which meant a subprocess per lookup, a wait before the flag appeared, and
+  telling a registry which addresses you were talking to. As before this is
+  the registry's country, not geolocation — an anycast address reads as its
+  owner's home country rather than the datacentre you reached.
 - **Hide Localhost / Hide LAN / Hide Remote**, on both the map and the
   Connections table, in the "…" menu on each. They compose, so any slice
   works — hiding remote leaves just this machine and the network around it.

@@ -56,10 +56,9 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         applySavedColumns()
         table.sortDescriptors = [NSSortDescriptor(key: sortKey.rawValue,
                                                   ascending: sortAscending)]
-        for name in [HostResolver.resolved, GeoResolver.resolved] {
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(hostsResolved), name: name, object: nil)
-        }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(hostsResolved),
+            name: HostResolver.resolved, object: nil)
         showPlaceholder("No connections")
     }
 
@@ -129,20 +128,13 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     }
 
     /// Flag plus code for a public address, a house for anything on this
-    /// network (RFC1918, loopback, or their IPv6 equivalents), blank while a
-    /// lookup is still out.
-    ///
-    /// `kick` starts a lookup when the answer isn't known yet. Only cell
-    /// drawing does that — sorting and filtering visit every row, including
-    /// hundreds that will never be on screen.
-    private func countryText(_ c: Connection, kick: Bool = false) -> String {
+    /// network (RFC1918, loopback, or their IPv6 equivalents), blank for space
+    /// no registry has delegated.
+    private func countryText(_ c: Connection) -> String {
         guard !c.remoteAddr.isEmpty else { return "" }
         if ConnectionGraph.isPrivate(c.remoteAddr) { return "🏠" }
-        let code = kick
-            ? GeoResolver.shared.countryCode(for: c.remoteAddr)
-            : GeoResolver.shared.cachedCountryCode(for: c.remoteAddr)
-        guard let code else { return "" }
-        let flag = GeoResolver.flag(code)
+        guard let code = GeoDatabase.countryCode(for: c.remoteAddr) else { return "" }
+        let flag = GeoDatabase.flag(code)
         return flag.isEmpty ? code : "\(flag) \(code)"
     }
 
@@ -265,7 +257,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         addColumn(id: "rport", title: "Remote Port", width: 94, key: .rport,
                   alignment: .right)
         if showProcess {
-            // Same lookup the map uses, so "Look Up Countries" governs both.
+            // Same table the map reads, so "Show Countries" governs both.
             addColumn(id: "country", title: "Country", width: 74, key: .country,
                       alignment: .left)
         }
@@ -566,7 +558,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         case "lport":   return c.localPort == 0 ? "—" : "\(c.localPort)"
         case "rhost":   return remoteHost(c)
         case "rport":   return c.remotePort == 0 ? "—" : "\(c.remotePort)"
-        case "country": return countryText(c, kick: true)
+        case "country": return countryText(c)
         case "state":   return ConnectionSampler.stateLabel(c.state)
         case "rcvd":    return c.rxBytes.map(F.formatTotal) ?? "—"
         case "sent":    return c.txBytes.map(F.formatTotal) ?? "—"
