@@ -150,6 +150,8 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
              "Hide 127.0.0.1 and ::1 — traffic that never leaves this Mac"),
             ("Hide LAN", ConnectionListView.hidesLAN, 1,
              "Hide RFC1918 and link-local peers — other devices on this network"),
+            ("Hide Remote", ConnectionListView.hidesRemote, 2,
+             "Hide everything off this network, leaving localhost and LAN"),
         ] {
             let item = NSMenuItem(title: title, action: #selector(toggleScope(_:)),
                                   keyEquivalent: "")
@@ -199,8 +201,11 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func toggleScope(_ sender: NSMenuItem) {
-        if sender.tag == 0 { ConnectionListView.hidesLoopback.toggle() }
-        else               { ConnectionListView.hidesLAN.toggle() }
+        switch sender.tag {
+        case 0:  ConnectionListView.hidesLoopback.toggle()
+        case 1:  ConnectionListView.hidesLAN.toggle()
+        default: ConnectionListView.hidesRemote.toggle()
+        }
         onScopeChange?()
         rebuild(immediate: true)
     }
@@ -225,6 +230,7 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
         let nodes = ConnectionGraph.nodes(from: rows,
                                           hidingLoopback: ConnectionListView.hidesLoopback,
                                           hidingLAN: ConnectionListView.hidesLAN,
+                                          hidingRemote: ConnectionListView.hidesRemote,
                                           directions: ConnectionListView.directions)
         map.setNodes(nodes, owners: owners, immediate: immediate)
         var subtitle = nodes.isEmpty ? "" : "\(nodes.count) host\(nodes.count == 1 ? "" : "s")"

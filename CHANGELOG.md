@@ -32,11 +32,12 @@ auto-update prompt.
   dialled, independently — "unclear" is a real state (UDP has no handshake to
   read, and a host can be dialled both ways), so it gets its own switch rather
   than being folded into one of the others.
-- **Hide Localhost / Hide LAN**, on both the map and the Connections table
-  (checkboxes on the map, matching items in the "…" menu). Localhost starts
-  hidden — traffic that never leaves the machine is rarely what you opened
-  this to see. Listening sockets are never hidden by these, so "what am I
-  exposing" stays answerable.
+- **Hide Localhost / Hide LAN / Hide Remote**, on both the map and the
+  Connections table, in the "…" menu on each. They compose, so any slice
+  works — hiding remote leaves just this machine and the network around it.
+  Localhost starts hidden: traffic that never leaves the machine is rarely
+  what you opened this to see. Listening sockets are never hidden by these,
+  so "what am I exposing" stays answerable.
 
 ## [0.3.1] - 2026-08-12
 

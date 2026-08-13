@@ -59,6 +59,7 @@ enum ConnectionGraph {
     static func nodes(from connections: [Connection],
                       hidingLoopback: Bool = false,
                       hidingLAN: Bool = false,
+                      hidingRemote: Bool = false,
                       directions: DirectionSet = .all) -> [GraphNode] {
         // Ports we're listening on: a connection whose *local* port is one of
         // them was dialled by the other end.
@@ -74,6 +75,7 @@ enum ConnectionGraph {
             guard !c.remoteAddr.isEmpty, c.state != TSI_S_LISTEN else { continue }
             if hidingLoopback, isLoopback(c.remoteAddr) { continue }
             if hidingLAN, isLAN(c.remoteAddr) { continue }
+            if hidingRemote, !isPrivate(c.remoteAddr) { continue }
 
             var node = byAddress[c.remoteAddr]
                 ?? GraphNode(address: c.remoteAddr, port: c.remotePort,

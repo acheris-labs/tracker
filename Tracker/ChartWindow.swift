@@ -915,6 +915,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             for (title, on, tag) in [
                 ("Hide Localhost", ConnectionListView.hidesLoopback, 0),
                 ("Hide LAN", ConnectionListView.hidesLAN, 1),
+                ("Hide Remote", ConnectionListView.hidesRemote, 2),
             ] {
                 let item = NSMenuItem(title: title,
                                       action: #selector(toggleTrafficScope(_:)),
@@ -1042,8 +1043,11 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func toggleTrafficScope(_ sender: NSMenuItem) {
-        if sender.tag == 0 { ConnectionListView.hidesLoopback.toggle() }
-        else               { ConnectionListView.hidesLAN.toggle() }
+        switch sender.tag {
+        case 0:  ConnectionListView.hidesLoopback.toggle()
+        case 1:  ConnectionListView.hidesLAN.toggle()
+        default: ConnectionListView.hidesRemote.toggle()
+        }
         connectionList.hostNameDisplayChanged()   // re-filters and redraws
         connectionMap?.rebuild(immediate: true)
     }

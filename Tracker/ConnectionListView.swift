@@ -102,6 +102,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
             if c.remoteAddr.isEmpty { return true }
             if Self.hidesLoopback, ConnectionGraph.isLoopback(c.remoteAddr) { return false }
             if Self.hidesLAN, ConnectionGraph.isLAN(c.remoteAddr) { return false }
+            if Self.hidesRemote, !ConnectionGraph.isPrivate(c.remoteAddr) { return false }
             return true
         }
         let matches = filter.isEmpty ? visible : visible.filter { c in
@@ -458,6 +459,13 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     static var hidesLAN: Bool {
         get { UserDefaults.standard.bool(forKey: hideLANKey) }
         set { UserDefaults.standard.set(newValue, forKey: hideLANKey) }
+    }
+
+    /// The complement of the other two: everything off this network.
+    private static let hideRemoteKey = "ConnectionsHideRemote"
+    static var hidesRemote: Bool {
+        get { UserDefaults.standard.bool(forKey: hideRemoteKey) }
+        set { UserDefaults.standard.set(newValue, forKey: hideRemoteKey) }
     }
 
     /// Map-only for now: the table lists sockets, where direction is a
