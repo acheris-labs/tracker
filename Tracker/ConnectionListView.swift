@@ -38,18 +38,29 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
 
     private var widthsKey: String  { "ConnectionColumnWidths.\(defaultsKey)" }
     private var hiddenKey: String  { "ConnectionColumnsHidden.\(defaultsKey)" }
+    private var orderKey: String   { "ConnectionColumnOrder.\(defaultsKey)" }
 
     /// The column that absorbs leftover width, like Process Name does in the
     /// process tabs.
     private var elasticColumnID: String { "rhost" }
 
+    /// Summary strip, on the top-level tab only (nil in the inspector).
+    private let footer: FooterBar?
+    /// Set by buildFooterPanes; called with each new sample.
+    private var footerUpdate: (([Connection]) -> Void)?
+    /// Recent direction counts feeding the footer graph. Same cap as the
+    /// process tabs' history, so both graphs span the same number of samples.
+    private var directionHistory: [(out: Double, incoming: Double)] = []
+    private static let historyCap = 60
+
     init(showProcess: Bool, defaultsKey: String) {
         self.showProcess = showProcess
         self.defaultsKey = defaultsKey
         self.sortKey = showProcess ? .process : .rhost
+        self.footer = showProcess ? FooterBar() : nil
         super.init(frame: NSRect(x: 0, y: 0, width: 480, height: 240))
-        // NSTabView positions its item views by frame, so this one stays
-        // frame-based (like the sibling panes) and its scroll view autoresizes.
+        // NSTabView positions its item views by frame, so this view is sized
+        // by its parent; its own subviews lay out with constraints.
         buildTable()
         buildLayout()
         buildRowMenu()
@@ -72,6 +83,10 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     /// doesn't re-sort and flicker rows that haven't moved.
     func setConnections(_ connections: [Connection],
                         processNames: [pid_t: ProcessOwner] = [:]) {
+        // Ahead of the no-op check below: the footer graph advances one sample
+        // per tick whether or not the socket list changed, or an idle machine
+        // would draw a frozen line rather than a flat one.
+        footerUpdate?(connections)
         let incoming = Set(connections)
         // Identity alone isn't enough once byte counters are in play, but they
         // are excluded from ==, so diff them separately rather than reloading
@@ -227,7 +242,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         table.style = .inset
         table.usesAlternatingRowBackgroundColors = true
         table.allowsColumnResizing = true
-        table.allowsColumnReordering = false
+        table.allowsColumnReordering = true
         table.allowsMultipleSelection = false
         table.allowsEmptySelection = true
         table.rowHeight = Theme.processRowHeight
@@ -292,8 +307,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         scroll.autohidesScrollers = true
         scroll.drawsBackground = true
         scroll.backgroundColor = .textBackgroundColor
-        scroll.frame = bounds
-        scroll.autoresizingMask = [.width, .height]
+        scroll.translatesAutoresizingMaskIntoConstraints = false
 
         placeholder.font = .systemFont(ofSize: 12)
         placeholder.textColor = .secondaryLabelColor
@@ -302,12 +316,88 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
 
         addSubview(scroll)
         addSubview(placeholder)
-        NSLayoutConstraint.activate([
+        var constraints = [
+            scroll.topAnchor.constraint(equalTo: topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             placeholder.centerXAnchor.constraint(equalTo: centerXAnchor),
             placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
             placeholder.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
             placeholder.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+        ]
+        // The footer belongs to the top-level tab, where it's the only summary
+        // of the whole picture. The inspector's copy is already scoped to one
+        // process and is short enough that 66pt of chrome would cost a row.
+        if let footer {
+            buildFooterPanes(footer)
+            addSubview(footer)
+            constraints += [
+                scroll.bottomAnchor.constraint(equalTo: footer.topAnchor),
+                footer.leadingAnchor.constraint(equalTo: leadingAnchor),
+                footer.trailingAnchor.constraint(equalTo: trailingAnchor),
+                footer.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ]
+        } else {
+            constraints.append(scroll.bottomAnchor.constraint(equalTo: bottomAnchor))
+        }
+        NSLayoutConstraint.activate(constraints)
+    }
+
+    /// Three panes matching the process tabs': who dialled whom, that same
+    /// split over time, and what the sockets are.
+    ///
+    /// Counts are of *every* connection on the machine, not the filtered rows.
+    /// A footer that moved when you typed in the search field would be
+    /// answering a different question from the one it looks like it answers.
+    private func buildFooterPanes(_ bar: FooterBar) {
+        // Outbound red, inbound blue — the same way round as the Disk tab's
+        // reads and writes.
+        let direction = FooterStatGrid(rows: [
+            .init(label: "Outgoing:", color: .systemRed),
+            .init(label: "Incoming:", color: .systemBlue),
+            .init(label: "Unclear:", color: nil),
         ])
+        let graph = FooterGraphView(caption: "Connections",
+                                    colors: [.systemRed, .systemBlue], mode: .mirror)
+        let kinds = FooterStatGrid(rows: [
+            .init(label: "TCP:", color: nil),
+            .init(label: "UDP:", color: nil),
+            .init(label: "Listening:", color: nil),
+        ])
+        bar.setPanes([direction, graph, kinds])
+
+        footerUpdate = { [weak self] rows in
+            guard let self else { return }
+            let counts = ConnectionGraph.originCounts(of: rows)
+            direction.setValue("\(counts.outgoing)", at: 0)
+            direction.setValue("\(counts.incoming)", at: 1)
+            direction.setValue("\(counts.unclear)", at: 2)
+
+            self.directionHistory.append((Double(counts.outgoing),
+                                          Double(counts.incoming)))
+            if self.directionHistory.count > Self.historyCap {
+                self.directionHistory.removeFirst()
+            }
+            // Shared scale across both halves so the mirror compares them,
+            // with a floor so a quiet machine doesn't draw one connection as
+            // a full-height block.
+            let peak = max(10, self.directionHistory
+                .map { max($0.out, $0.incoming) }.max() ?? 0)
+            graph.setLayers([self.directionHistory.map { $0.out / peak },
+                             self.directionHistory.map { $0.incoming / peak }])
+
+            var tcp = 0, udp = 0, listening = 0
+            for c in rows {
+                switch c.proto {
+                case .tcp4, .tcp6: tcp += 1
+                case .udp4, .udp6: udp += 1
+                }
+                if c.state == TSI_S_LISTEN { listening += 1 }
+            }
+            kinds.setValue("\(tcp)", at: 0)
+            kinds.setValue("\(udp)", at: 1)
+            kinds.setValue("\(listening)", at: 2)
+        }
     }
 
     private func showPlaceholder(_ message: String) {
@@ -332,6 +422,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
 
     private func applySavedColumns() {
         let d = UserDefaults.standard
+        TableColumnOrder.apply(d.stringArray(forKey: orderKey), to: table)
         let hidden = Set(d.stringArray(forKey: hiddenKey) ?? Array(defaultHidden))
         let widths = d.dictionary(forKey: widthsKey) as? [String: Double] ?? [:]
         isFittingColumns = true
@@ -401,6 +492,10 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
             guard abs(overflow) > 0.5 else { break }
             elastic.width = max(90, elastic.width - overflow)
         }
+    }
+
+    func tableView(_ tableView: NSTableView, didDrag tableColumn: NSTableColumn) {
+        UserDefaults.standard.set(TableColumnOrder.of(table), forKey: orderKey)
     }
 
     func tableViewColumnDidResize(_ notification: Notification) {

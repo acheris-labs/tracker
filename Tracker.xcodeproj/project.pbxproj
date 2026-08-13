@@ -31,6 +31,7 @@
 		AA000000000000000000004E /* GeoDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004D /* GeoDatabase.swift */; };
 		AA0000000000000000000050 /* ConnectionMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004F /* ConnectionMapView.swift */; };
 		AA0000000000000000000052 /* ConnectionMapWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000051 /* ConnectionMapWindow.swift */; };
+		AA0000000000000000000056 /* TableColumnOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000055 /* TableColumnOrder.swift */; };
 		AA0000000000000000000040 /* ConnectionSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000041 /* ConnectionSampler.swift */; };
 		AA0000000000000000000042 /* HostResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000043 /* HostResolver.swift */; };
 		AA0000000000000000000044 /* ConnectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000045 /* ConnectionListView.swift */; };
@@ -65,6 +66,7 @@
 		AA000000000000000000004D /* GeoDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoDatabase.swift; sourceTree = "<group>"; };
 		AA000000000000000000004F /* ConnectionMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMapView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000051 /* ConnectionMapWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMapWindow.swift; sourceTree = "<group>"; };
+		AA0000000000000000000055 /* TableColumnOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TableColumnOrder.swift; sourceTree = "<group>"; };
 		AA0000000000000000000041 /* ConnectionSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSampler.swift; sourceTree = "<group>"; };
 		AA0000000000000000000043 /* HostResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostResolver.swift; sourceTree = "<group>"; };
 		AA0000000000000000000045 /* ConnectionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionListView.swift; sourceTree = "<group>"; };
@@ -141,6 +143,7 @@
 				AA000000000000000000004D /* GeoDatabase.swift */,
 				AA000000000000000000004F /* ConnectionMapView.swift */,
 				AA0000000000000000000051 /* ConnectionMapWindow.swift */,
+				AA0000000000000000000055 /* TableColumnOrder.swift */,
 				AA0000000000000000000041 /* ConnectionSampler.swift */,
 				AA0000000000000000000043 /* HostResolver.swift */,
 				AA0000000000000000000045 /* ConnectionListView.swift */,
@@ -246,6 +249,7 @@
 				AA000000000000000000004E /* GeoDatabase.swift in Sources */,
 				AA0000000000000000000050 /* ConnectionMapView.swift in Sources */,
 				AA0000000000000000000052 /* ConnectionMapWindow.swift in Sources */,
+				AA0000000000000000000056 /* TableColumnOrder.swift in Sources */,
 				AA0000000000000000000040 /* ConnectionSampler.swift in Sources */,
 				AA0000000000000000000042 /* HostResolver.swift in Sources */,
 				AA0000000000000000000044 /* ConnectionListView.swift in Sources */,

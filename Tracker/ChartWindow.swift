@@ -368,9 +368,9 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
         init(index: Int) {
             switch index {
-            case 0: self = .chart
+            case ChartIndex.value: self = .chart
             case ConnectionsIndex.value: self = .connections
-            default: self = ProcessListView.Tab(rawValue: index - 1).map(Pane.process) ?? .chart
+            default: self = ProcessListView.Tab(rawValue: index).map(Pane.process) ?? .chart
             }
         }
 
@@ -382,13 +382,19 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         var hasProcessActions: Bool { self != .chart }
     }
 
-    /// Last segment; kept in one place so the index arithmetic has a name.
-    enum ConnectionsIndex { static let value = 6 }
+    /// The two segments that aren't process categories; kept in one place so
+    /// the index arithmetic has a name. Process categories occupy 0…4, in
+    /// ProcessListView.Tab's own order.
+    enum ConnectionsIndex { static let value = 5 }
+    enum ChartIndex { static let value = 6 }
 
     private(set) var pane: Pane = .chart
     private let tabs = RightClickableTabView()
+    // The lists lead and the chart trails: the tabs you act on are the ones
+    // you reach for, and Chart is where you land by default anyway.
     private let selector = NSSegmentedControl(
-        labels: ["Chart", "CPU", "Memory", "Energy", "Disk", "Network", "Connections"],
+        labels: ["CPU", "Memory", "Energy", "Disk", "Network", "Connections",
+                 "Visualizations"],
         trackingMode: .selectOne, target: nil, action: nil)
     private weak var renderer: HistoryRenderer?
     private let hasBattery: Bool
@@ -461,7 +467,9 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
     /// ⌘F from the main menu — focuses the toolbar search on process tabs.
     @objc func focusSearch(_ sender: Any?) {
-        guard selector.selectedSegment > 0 else { NSSound.beep(); return }
+        guard Pane(index: selector.selectedSegment).hasSearch else {
+            NSSound.beep(); return
+        }
         searchItem?.beginSearchInteraction()
     }
 
@@ -693,7 +701,10 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             tabs.trailingAnchor.constraint(equalTo: root.trailingAnchor),
         ])
         window.contentView = root
-        applySelection(0)
+        // Open on the process list, not the graphs: it's the tab you act on.
+        // Which category is ProcessListView's business — it restores the one
+        // you left it on, and defaults to CPU.
+        applySelection(processList.currentTab.rawValue)
 
         applyCurrentColors()
         updateRightAxis()
@@ -962,19 +973,21 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         guard let raw = sender.representedObject as? Int,
               let scope = ProcessListView.Scope(rawValue: raw) else { return }
         processList.applyScope(scope)
-        if selector.selectedSegment > 0 { window?.subtitle = scope.label }
+        if Pane(index: selector.selectedSegment).isProcess {
+            window?.subtitle = scope.label
+        }
     }
 
     // Menu-driven selection (⌘1 / ⌘2 from the app's Window menu).
-    @objc func selectChartTab(_ sender: Any?)     { applySelection(0) }   // Chart
-    @objc func selectProcessesTab(_ sender: Any?) { applySelection(1) }   // CPU category
+    @objc func selectChartTab(_ sender: Any?)     { applySelection(ChartIndex.value) }
+    @objc func selectProcessesTab(_ sender: Any?) { applySelection(0) }   // CPU category
     @objc func selectConnectionsTab(_ sender: Any?) { applySelection(ConnectionsIndex.value) }
 
     @objc private func selectorChanged(_ s: NSSegmentedControl) {
         applySelection(s.selectedSegment)
     }
 
-    /// 0 = Chart; 1…5 = process categories; 6 = Connections.
+    /// 0…4 = process categories; 5 = Connections; 6 = Chart.
     private func applySelection(_ index: Int) {
         let i = max(0, index)
         selector.selectedSegment = i

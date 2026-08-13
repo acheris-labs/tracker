@@ -39,20 +39,34 @@ auto-update prompt.
   code for public addresses and a house for anything on this network
   (RFC1918, loopback, and their IPv6 equivalents). It uses the same source as
   the map, so "Show Countries" governs both.
-- **Countries come from a table bundled with the app**, compiled from the five
+  Countries come from a table bundled with the app, compiled from the five
   regional registries' published delegation statistics and refreshed on every
-  release. Flags now appear the instant a row does, and nothing about your
-  connections goes anywhere: the previous approach ran a `whois` per netblock,
-  which meant a subprocess per lookup, a wait before the flag appeared, and
-  telling a registry which addresses you were talking to. As before this is
-  the registry's country, not geolocation — an anycast address reads as its
-  owner's home country rather than the datacentre you reached.
+  release: flags appear the instant a row does, and nothing about your
+  connections goes anywhere. It is the registry's country rather than
+  geolocation, so an anycast address reads as its owner's home country
+  instead of the datacentre you actually reached.
+- **A footer on the Connections tab**, matching the process tabs: how many
+  connections each side opened (outgoing, incoming, and the unclear ones), the
+  same split graphed over time, and what the sockets are — TCP, UDP, and how
+  many are listening. It counts every connection on the machine, not the rows
+  left after a search, so it answers the same question whatever you've typed.
 - **Hide Localhost / Hide LAN / Hide Remote**, on both the map and the
   Connections table, in the "…" menu on each. They compose, so any slice
   works — hiding remote leaves just this machine and the network around it.
   Localhost starts hidden: traffic that never leaves the machine is rarely
   what you opened this to see. Listening sockets are never hidden by these,
   so "what am I exposing" stays answerable.
+- **Drag columns into the order you want**, in both the process tables and the
+  Connections table. The order persists with the widths and the visible set.
+  Process categories share one order — a column means the same thing on every
+  tab — while the Connections table and the inspector's keep their own.
+
+### Changed
+- **The window opens on the process list, not the graphs.** The tab you act on
+  is the one you land on; the graphs moved to the end of the row and are named
+  **Visualizations**. Clicking the dock icon now just shows the window on
+  whatever tab you left it on, rather than forcing the graphs to the front —
+  the dock menu's Visualizations entry (⌘1) still goes straight there.
 
 ## [0.3.1] - 2026-08-12
 

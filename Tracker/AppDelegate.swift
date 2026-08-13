@@ -109,9 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication,
                                        hasVisibleWindows flag: Bool) -> Bool {
-        // If a window is already up, let AppKit bring it forward.
-        // Otherwise open the chart window.
-        if !flag { showChartWindow(nil) }
+        // If a window is already up, let AppKit bring it forward. Otherwise
+        // open the main window on whichever tab it opens on — clicking the
+        // dock icon is "show me the app", not "show me the graphs".
+        if !flag { ensureChartWindow() }
         return true
     }
 
@@ -615,7 +616,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(autoItem)
         appMenu.addItem(.separator())
         let chartItem = NSMenuItem(
-            title: "Chart",
+            title: "Visualizations",
             action: #selector(showChartWindow(_:)),
             keyEquivalent: "1"
         )

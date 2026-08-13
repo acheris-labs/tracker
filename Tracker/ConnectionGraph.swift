@@ -105,6 +105,25 @@ enum ConnectionGraph {
         return kept.sorted { $0.total > $1.total }
     }
 
+    /// How many established connections each side opened. Listeners are left
+    /// out: they have no peer, so nobody has dialled anything yet.
+    static func originCounts(of connections: [Connection])
+    -> (outgoing: Int, incoming: Int, unclear: Int) {
+        var listening: Set<UInt16> = []
+        for c in connections where c.state == TSI_S_LISTEN {
+            listening.insert(c.localPort)
+        }
+        var out = 0, incoming = 0, unclear = 0
+        for c in connections where !c.remoteAddr.isEmpty && c.state != TSI_S_LISTEN {
+            switch origin(of: c, listening: listening) {
+            case .weInitiated:   out += 1
+            case .theyInitiated: incoming += 1
+            case .unknown:       unclear += 1
+            }
+        }
+        return (out, incoming, unclear)
+    }
+
     private static func origin(of c: Connection, listening: Set<UInt16>) -> Origin {
         // Landed on a port we're listening on: they dialled us.
         if listening.contains(c.localPort) { return .theyInitiated }
