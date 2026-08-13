@@ -460,13 +460,17 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         set { UserDefaults.standard.set(newValue, forKey: hideLANKey) }
     }
 
-    /// Map-only for now: the table lists sockets, where "direction" is a
+    /// Map-only for now: the table lists sockets, where direction is a
     /// per-row property rather than a view mode.
-    private static let directionKey = "ConnectionsDirection"
-    static var directionFilter: ConnectionGraph.DirectionFilter {
-        get { ConnectionGraph.DirectionFilter(
-                rawValue: UserDefaults.standard.integer(forKey: directionKey)) ?? .all }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: directionKey) }
+    private static let directionsKey = "ConnectionsDirections"
+    static var directions: ConnectionGraph.DirectionSet {
+        get {
+            guard let raw = UserDefaults.standard.object(forKey: directionsKey) as? Int
+            else { return .all }
+            let set = ConnectionGraph.DirectionSet(rawValue: raw)
+            return set.isEmpty ? .all : set
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: directionsKey) }
     }
 
     /// Re-render after a display setting is toggled (host names also change

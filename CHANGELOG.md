@@ -26,8 +26,10 @@ auto-update prompt.
   their icons and pids, the connection count, byte totals and which side
   opened it — and the map holds still while the pointer is over it. Clicking
   opens that process's inspector; when several processes share a host, it
-  offers a pick list. A Both / Outgoing / Incoming control filters by which
-  side dialled.
+  offers a pick list. Outgoing / Incoming / Unclear filter by which side
+  dialled, independently — "unclear" is a real state (UDP has no handshake to
+  read, and a host can be dialled both ways), so it gets its own switch rather
+  than being folded into one of the others.
 - **Hide Localhost / Hide LAN**, on both the map and the Connections table
   (checkboxes on the map, matching items in the "…" menu). Localhost starts
   hidden — traffic that never leaves the machine is rarely what you opened

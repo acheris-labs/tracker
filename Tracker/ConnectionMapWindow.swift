@@ -26,8 +26,8 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
 
     private let map = ConnectionMapView()
     private let direction = NSSegmentedControl(
-        labels: ["Both", "Outgoing", "Incoming"],
-        trackingMode: .selectOne, target: nil, action: nil)
+        labels: ConnectionGraph.DirectionSet.ordered.map(\.1),
+        trackingMode: .selectAny, target: nil, action: nil)
     private var actionsItem: NSMenuToolbarItem?
     private var rows: [Connection] = []
     private var owners: [pid_t: ProcessOwner] = [:]
@@ -45,10 +45,14 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
         windowFrameAutosaveName = "ConnectionMap"
         win.delegate = self
 
-        direction.selectedSegment = ConnectionListView.directionFilter.rawValue
+        // Neutral selection, like the main window's tab selector and the
+        // inspector's — the accent blue reads as a different kind of control.
+        direction.selectedSegmentBezelColor = .unemphasizedSelectedContentBackgroundColor
         direction.target = self
         direction.action = #selector(directionChanged(_:))
-        direction.toolTip = "Filter by which side opened the connection"
+        direction.toolTip = "Which side opened the connection. Unclear covers UDP, "
+            + "which has no handshake, and hosts dialled in both directions."
+        syncDirection()
 
         let toolbar = NSToolbar(identifier: "ConnectionMap")
         toolbar.delegate = self
@@ -143,9 +147,28 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
     // MARK: - Actions
 
     @objc private func directionChanged(_ sender: NSSegmentedControl) {
-        ConnectionListView.directionFilter =
-            ConnectionGraph.DirectionFilter(rawValue: sender.selectedSegment) ?? .all
+        var set = ConnectionGraph.DirectionSet()
+        for (i, entry) in ConnectionGraph.DirectionSet.ordered.enumerated()
+        where sender.isSelected(forSegment: i) {
+            set.insert(entry.0)
+        }
+        // Turning the last one off would blank the map with no way back from
+        // the map itself; refuse it the way the column menu refuses the last
+        // column.
+        guard !set.isEmpty else {
+            NSSound.beep()
+            syncDirection()
+            return
+        }
+        ConnectionListView.directions = set
         rebuild(immediate: true)
+    }
+
+    private func syncDirection() {
+        let set = ConnectionListView.directions
+        for (i, entry) in ConnectionGraph.DirectionSet.ordered.enumerated() {
+            direction.setSelected(set.contains(entry.0), forSegment: i)
+        }
     }
 
     @objc private func toggleScope(_ sender: NSMenuItem) {
@@ -168,11 +191,11 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
     /// menu, so the two stay in step. `immediate` skips the pointer-freeze,
     /// because a change the user just made has to land now.
     func rebuild(immediate: Bool = false) {
-        direction.selectedSegment = ConnectionListView.directionFilter.rawValue
+        syncDirection()
         let nodes = ConnectionGraph.nodes(from: rows,
                                           hidingLoopback: ConnectionListView.hidesLoopback,
                                           hidingLAN: ConnectionListView.hidesLAN,
-                                          direction: ConnectionListView.directionFilter)
+                                          directions: ConnectionListView.directions)
         map.setNodes(nodes, owners: owners, immediate: immediate)
         window?.subtitle = nodes.isEmpty ? ""
             : "\(nodes.count) host\(nodes.count == 1 ? "" : "s")"

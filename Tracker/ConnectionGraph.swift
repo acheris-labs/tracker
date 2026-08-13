@@ -32,14 +32,26 @@ enum ConnectionGraph {
     /// tell an outbound connection from an inbound one.
     static let ephemeralRange: ClosedRange<UInt16> = 49152...65535
 
-    /// Which side opened the connection, as a filter.
-    enum DirectionFilter: Int {
-        case all, outgoing, incoming
-        var label: String {
-            switch self {
-            case .all:      return "Both directions"
-            case .outgoing: return "Outgoing only"
-            case .incoming: return "Incoming only"
+    /// Which origins to show. A set rather than a three-way choice because
+    /// "unclear" is a real state — UDP has no handshake to read — and pairing
+    /// it with in/out as if they were alternatives makes neither read right.
+    struct DirectionSet: OptionSet {
+        let rawValue: Int
+        static let outgoing = DirectionSet(rawValue: 1 << 0)
+        static let incoming = DirectionSet(rawValue: 1 << 1)
+        static let unclear  = DirectionSet(rawValue: 1 << 2)
+        static let all: DirectionSet = [.outgoing, .incoming, .unclear]
+
+        /// Segment order in the map's toolbar control.
+        static let ordered: [(DirectionSet, String)] = [
+            (.outgoing, "Outgoing"), (.incoming, "Incoming"), (.unclear, "Unclear"),
+        ]
+
+        func allows(_ origin: Origin) -> Bool {
+            switch origin {
+            case .weInitiated:   return contains(.outgoing)
+            case .theyInitiated: return contains(.incoming)
+            case .unknown:       return contains(.unclear)
             }
         }
     }
@@ -47,7 +59,7 @@ enum ConnectionGraph {
     static func nodes(from connections: [Connection],
                       hidingLoopback: Bool = false,
                       hidingLAN: Bool = false,
-                      direction: DirectionFilter = .all) -> [GraphNode] {
+                      directions: DirectionSet = .all) -> [GraphNode] {
         // Ports we're listening on: a connection whose *local* port is one of
         // them was dialled by the other end.
         var listening: Set<UInt16> = []
@@ -83,15 +95,9 @@ enum ConnectionGraph {
             }
         }
 
-        // Direction filters on the folded node: a host we both dialled and
-        // were dialled by is `.unknown`, and stays out of both one-way views.
-        let kept = byAddress.values.filter { node in
-            switch direction {
-            case .all:      return true
-            case .outgoing: return node.origin == .weInitiated
-            case .incoming: return node.origin == .theyInitiated
-            }
-        }
+        // A host we both dialled and were dialled by folds to `.unknown`, so
+        // it shows under Unclear rather than being claimed by either side.
+        let kept = byAddress.values.filter { directions.allows($0.origin) }
         // Busiest first — collapsing the tail hid exactly the hosts you'd
         // want to notice.
         return kept.sorted { $0.total > $1.total }
