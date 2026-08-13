@@ -26,6 +26,10 @@
 		AA000000000000000000003C /* InspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003B /* InspectorPanel.swift */; };
 		AA000000000000000000003E /* Appearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003D /* Appearance.swift */; };
 		AA000000000000000000004A /* SystemConnectionSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000049 /* SystemConnectionSampler.swift */; };
+		AA000000000000000000004C /* ConnectionGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004B /* ConnectionGraph.swift */; };
+		AA000000000000000000004E /* GeoResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004D /* GeoResolver.swift */; };
+		AA0000000000000000000050 /* ConnectionMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004F /* ConnectionMapView.swift */; };
+		AA0000000000000000000052 /* ConnectionMapWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000051 /* ConnectionMapWindow.swift */; };
 		AA0000000000000000000040 /* ConnectionSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000041 /* ConnectionSampler.swift */; };
 		AA0000000000000000000042 /* HostResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000043 /* HostResolver.swift */; };
 		AA0000000000000000000044 /* ConnectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000045 /* ConnectionListView.swift */; };
@@ -55,6 +59,10 @@
 		AA000000000000000000003B /* InspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorPanel.swift; sourceTree = "<group>"; };
 		AA000000000000000000003D /* Appearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Appearance.swift; sourceTree = "<group>"; };
 		AA0000000000000000000049 /* SystemConnectionSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemConnectionSampler.swift; sourceTree = "<group>"; };
+		AA000000000000000000004B /* ConnectionGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionGraph.swift; sourceTree = "<group>"; };
+		AA000000000000000000004D /* GeoResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoResolver.swift; sourceTree = "<group>"; };
+		AA000000000000000000004F /* ConnectionMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMapView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000051 /* ConnectionMapWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMapWindow.swift; sourceTree = "<group>"; };
 		AA0000000000000000000041 /* ConnectionSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSampler.swift; sourceTree = "<group>"; };
 		AA0000000000000000000043 /* HostResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostResolver.swift; sourceTree = "<group>"; };
 		AA0000000000000000000045 /* ConnectionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionListView.swift; sourceTree = "<group>"; };
@@ -126,6 +134,10 @@
 				AA000000000000000000003B /* InspectorPanel.swift */,
 				AA000000000000000000003D /* Appearance.swift */,
 				AA0000000000000000000049 /* SystemConnectionSampler.swift */,
+				AA000000000000000000004B /* ConnectionGraph.swift */,
+				AA000000000000000000004D /* GeoResolver.swift */,
+				AA000000000000000000004F /* ConnectionMapView.swift */,
+				AA0000000000000000000051 /* ConnectionMapWindow.swift */,
 				AA0000000000000000000041 /* ConnectionSampler.swift */,
 				AA0000000000000000000043 /* HostResolver.swift */,
 				AA0000000000000000000045 /* ConnectionListView.swift */,
@@ -226,6 +238,10 @@
 				AA000000000000000000003C /* InspectorPanel.swift in Sources */,
 				AA000000000000000000003E /* Appearance.swift in Sources */,
 				AA000000000000000000004A /* SystemConnectionSampler.swift in Sources */,
+				AA000000000000000000004C /* ConnectionGraph.swift in Sources */,
+				AA000000000000000000004E /* GeoResolver.swift in Sources */,
+				AA0000000000000000000050 /* ConnectionMapView.swift in Sources */,
+				AA0000000000000000000052 /* ConnectionMapWindow.swift in Sources */,
 				AA0000000000000000000040 /* ConnectionSampler.swift in Sources */,
 				AA0000000000000000000042 /* HostResolver.swift in Sources */,
 				AA0000000000000000000044 /* ConnectionListView.swift in Sources */,

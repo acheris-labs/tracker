@@ -357,6 +357,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     let chartView: ChartView
     let processList = ProcessListView()
     let connectionList = ConnectionListView(showProcess: true, defaultsKey: "all")
+    private var connectionMap: ConnectionMapWindowController?
 
     /// What the segmented control's index means. The process categories keep
     /// their own enum; this one is about window chrome.
@@ -898,12 +899,39 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         menu.addItem(hist)
 
         if pane == .connections {
+            let map = NSMenuItem(title: "Connection Map…",
+                                 action: #selector(showConnectionMap(_:)),
+                                 keyEquivalent: "")
+            map.target = self
+            menu.addItem(map)
+
             let resolve = NSMenuItem(title: "Resolve Host Names",
                                      action: #selector(toggleHostNameResolution(_:)),
                                      keyEquivalent: "")
             resolve.target = self
             resolve.state = ConnectionListView.resolvesHostNames ? .on : .off
             menu.addItem(resolve)
+
+            for (title, on, tag) in [
+                ("Hide Localhost", ConnectionListView.hidesLoopback, 0),
+                ("Hide LAN", ConnectionListView.hidesLAN, 1),
+            ] {
+                let item = NSMenuItem(title: title,
+                                      action: #selector(toggleTrafficScope(_:)),
+                                      keyEquivalent: "")
+                item.target = self
+                item.state = on ? .on : .off
+                item.tag = tag
+                menu.addItem(item)
+            }
+
+            let geo = NSMenuItem(title: "Look Up Countries",
+                                 action: #selector(toggleCountryLookup(_:)),
+                                 keyEquivalent: "")
+            geo.target = self
+            geo.state = GeoResolver.isEnabled ? .on : .off
+            geo.toolTip = "Asks the regional registry who owns each address."
+            menu.addItem(geo)
         }
 
         let cols = NSMenuItem(title: "Columns", action: nil, keyEquivalent: "")
@@ -979,10 +1007,36 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     /// so the netstat column's 16-character truncation doesn't show.
     func setConnections(_ rows: [Connection], processNames: [pid_t: ProcessOwner]) {
         connectionList.setConnections(rows, processNames: processNames)
+        connectionMap?.setConnections(rows, processNames: processNames)
     }
 
     var isConnectionsPaneVisible: Bool {
-        pane == .connections && (window?.isVisible ?? false)
+        if connectionMap?.window?.isVisible == true { return true }
+        return pane == .connections && (window?.isVisible ?? false)
+    }
+
+    @objc private func showConnectionMap(_ sender: Any?) {
+        if connectionMap == nil {
+            let controller = ConnectionMapWindowController()
+            controller.onClose = { [weak self] in self?.connectionMap = nil }
+            controller.onScopeChange = { [weak self] in
+                self?.connectionList.hostNameDisplayChanged()
+            }
+            connectionMap = controller
+        }
+        connectionMap?.showWindow(nil)
+        connectionMap?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func toggleCountryLookup(_ sender: NSMenuItem) {
+        GeoResolver.isEnabled.toggle()
+    }
+
+    @objc private func toggleTrafficScope(_ sender: NSMenuItem) {
+        if sender.tag == 0 { ConnectionListView.hidesLoopback.toggle() }
+        else               { ConnectionListView.hidesLAN.toggle() }
+        connectionList.hostNameDisplayChanged()   // re-filters and redraws
+        connectionMap?.rebuild()
     }
 
     private static func axisLabel(_ s: String, alignment: NSTextAlignment) -> NSTextField {

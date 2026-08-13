@@ -11,6 +11,23 @@ auto-update prompt.
 
 ## [Unreleased]
 
+### Added
+- **Connection Map.** "…" › Connection Map on the Connections tab opens a
+  radial view: this Mac at the centre, every host it's talking to around it,
+  and edges weighted by how much data crossed them (logarithmically, so a
+  600 MB upload and a 4 KB poll can share one picture). Blue edges are mostly
+  inbound, orange mostly outbound, and the arrowhead points the way the
+  connection was opened — worked out from which end holds the ephemeral port,
+  or which end's port we're listening on. Public hosts carry their country
+  flag, looked up through `whois` in the background and cached by netblock;
+  LAN and loopback peers show a house instead, since they have no registry
+  country.
+- **Hide Localhost / Hide LAN**, on both the map and the Connections table
+  (checkboxes on the map, matching items in the "…" menu). Localhost starts
+  hidden — traffic that never leaves the machine is rarely what you opened
+  this to see. Listening sockets are never hidden by these, so "what am I
+  exposing" stays answerable.
+
 ## [0.3.1] - 2026-08-12
 
 ### Added

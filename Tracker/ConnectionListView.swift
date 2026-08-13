@@ -96,7 +96,15 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     }
 
     private func applyFilterAndSort() {
-        let matches = filter.isEmpty ? all : all.filter { c in
+        // Listeners (no remote) always stay: they aren't traffic, and hiding
+        // them would make "what am I exposing" unanswerable.
+        let visible = all.filter { c in
+            if c.remoteAddr.isEmpty { return true }
+            if Self.hidesLoopback, ConnectionGraph.isLoopback(c.remoteAddr) { return false }
+            if Self.hidesLAN, ConnectionGraph.isLAN(c.remoteAddr) { return false }
+            return true
+        }
+        let matches = filter.isEmpty ? visible : visible.filter { c in
             let fields = [processLabel(c), "\(c.pid)", owner(c.pid)?.user ?? "",
                           c.proto.label, c.localAddr,
                           "\(c.localPort)", remoteHost(c), c.remoteAddr,
@@ -437,8 +445,23 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         set { UserDefaults.standard.set(newValue, forKey: resolveKey) }
     }
 
-    /// Re-render after the setting is toggled (it also changes the sort order,
-    /// since this column sorts on what's displayed).
+    /// Two independent filters, shared with the connection map so both
+    /// surfaces agree. Loopback never leaves the machine and is rarely what
+    /// you came to look at, so it starts hidden; LAN peers are real traffic to
+    /// real devices and start visible.
+    private static let hideLoopbackKey = "ConnectionsHideLoopback"
+    private static let hideLANKey = "ConnectionsHideLAN"
+    static var hidesLoopback: Bool {
+        get { UserDefaults.standard.object(forKey: hideLoopbackKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: hideLoopbackKey) }
+    }
+    static var hidesLAN: Bool {
+        get { UserDefaults.standard.bool(forKey: hideLANKey) }
+        set { UserDefaults.standard.set(newValue, forKey: hideLANKey) }
+    }
+
+    /// Re-render after a display setting is toggled (host names also change
+    /// the sort order, since that column sorts on what's displayed).
     func hostNameDisplayChanged() { applyFilterAndSort() }
 
     private func remoteHost(_ c: Connection) -> String {
