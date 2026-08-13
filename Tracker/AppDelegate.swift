@@ -520,9 +520,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                        netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec,
                        swapUsed: swap.used)
 
-        // Only pay the per-process sampling cost when someone is looking,
-        // and only at the user-chosen interval (default 2s).
-        if let win = chart?.window, win.isVisible {
+        // Only pay the per-process sampling cost when someone is looking, and
+        // only at the user-chosen interval (default 2s). "Looking" includes the
+        // connection map on its own — it outlives the main window, and a map
+        // quietly showing a stale sample is worse than showing none.
+        if chart?.needsLiveSamples == true {
             pushSystemStats()
             processTickCount += 1
             if processTickCount >= processIntervalSeconds {

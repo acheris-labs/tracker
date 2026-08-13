@@ -1010,6 +1010,12 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         connectionMap?.setConnections(rows, processNames: processNames)
     }
 
+    /// Whether anything on screen needs fresh process/connection samples —
+    /// the main window, or the map on its own.
+    var needsLiveSamples: Bool {
+        (window?.isVisible ?? false) || connectionMap?.window?.isVisible == true
+    }
+
     var isConnectionsPaneVisible: Bool {
         if connectionMap?.window?.isVisible == true { return true }
         return pane == .connections && (window?.isVisible ?? false)

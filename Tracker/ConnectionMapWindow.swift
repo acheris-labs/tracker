@@ -3,6 +3,7 @@ import AppKit
 extension NSToolbarItem.Identifier {
     static let mapDirection = NSToolbarItem.Identifier("MapDirection")
     static let mapActions   = NSToolbarItem.Identifier("MapActions")
+    static let mapPause     = NSToolbarItem.Identifier("MapPause")
 }
 
 /// Window around ConnectionMapView. One instance at a time, owned by the chart
@@ -29,6 +30,10 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
         labels: ConnectionGraph.DirectionSet.ordered.map(\.1),
         trackingMode: .selectAny, target: nil, action: nil)
     private var actionsItem: NSMenuToolbarItem?
+    private var pauseItem: NSToolbarItem?
+    /// Holds the picture still until you say otherwise — the hover freeze only
+    /// lasts as long as the pointer rests on a node.
+    private var isPaused = false
     private var rows: [Connection] = []
     private var owners: [pid_t: ProcessOwner] = [:]
 
@@ -78,7 +83,7 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
     // MARK: - Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.mapActions, .flexibleSpace, .mapDirection, .flexibleSpace]
+        [.mapActions, .mapPause, .flexibleSpace, .mapDirection, .flexibleSpace]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -92,6 +97,18 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
             let item = NSToolbarItem(itemIdentifier: id)
             item.view = direction
             item.label = "Direction"
+            return item
+        case .mapPause:
+            let item = NSToolbarItem(itemIdentifier: id)
+            item.image = NSImage(systemSymbolName: "pause.circle",
+                                 accessibilityDescription: "Pause")
+            item.label = "Pause"
+            item.toolTip = "Stop refreshing the map"
+            item.isBordered = true
+            item.autovalidates = false
+            item.target = self
+            item.action = #selector(togglePause(_:))
+            pauseItem = item
             return item
         case .mapActions:
             let item = NSMenuToolbarItem(itemIdentifier: id)
@@ -146,6 +163,16 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
 
     // MARK: - Actions
 
+    @objc private func togglePause(_ sender: Any?) {
+        isPaused.toggle()
+        pauseItem?.image = NSImage(
+            systemSymbolName: isPaused ? "play.circle" : "pause.circle",
+            accessibilityDescription: isPaused ? "Resume" : "Pause")
+        pauseItem?.toolTip = isPaused ? "Resume refreshing" : "Stop refreshing the map"
+        // Resuming catches up on whatever arrived while it was held.
+        rebuild(immediate: true)
+    }
+
     @objc private func directionChanged(_ sender: NSSegmentedControl) {
         var set = ConnectionGraph.DirectionSet()
         for (i, entry) in ConnectionGraph.DirectionSet.ordered.enumerated()
@@ -182,8 +209,11 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
 
     /// Fed from the same sample that drives the Connections table.
     func setConnections(_ rows: [Connection], processNames: [pid_t: ProcessOwner]) {
+        // Keep collecting while paused so resuming shows the present, not a
+        // replay of the moment you paused.
         self.rows = rows
         self.owners = processNames
+        guard !isPaused else { return }
         rebuild()
     }
 
@@ -197,7 +227,8 @@ final class ConnectionMapWindowController: NSWindowController, NSWindowDelegate,
                                           hidingLAN: ConnectionListView.hidesLAN,
                                           directions: ConnectionListView.directions)
         map.setNodes(nodes, owners: owners, immediate: immediate)
-        window?.subtitle = nodes.isEmpty ? ""
-            : "\(nodes.count) host\(nodes.count == 1 ? "" : "s")"
+        var subtitle = nodes.isEmpty ? "" : "\(nodes.count) host\(nodes.count == 1 ? "" : "s")"
+        if isPaused { subtitle += subtitle.isEmpty ? "paused" : " · paused" }
+        window?.subtitle = subtitle
     }
 }

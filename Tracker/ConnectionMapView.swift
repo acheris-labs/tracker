@@ -7,12 +7,16 @@ final class ConnectionMapView: NSView {
     private var owners: [pid_t: ProcessOwner] = [:]
     /// Where each node was drawn, for hit-testing the pointer.
     private var placements: [(node: GraphNode, center: NSPoint)] = []
-    /// Addresses in the order they were first seen. Ordering by traffic made
-    /// the circle reshuffle on every refresh; a host keeps its seat instead.
-    private var order: [String] = []
-    /// Samples that arrived while the pointer was inside, applied on exit.
+    /// Fixed seats around the circle, by address. A host holds its seat for as
+    /// long as it's present, so one arriving or leaving doesn't move everyone
+    /// else — index-based placement re-shuffled the whole ring every sample.
+    /// `nil` is a vacated seat, kept until enough pile up to be worth compacting.
+    private var seats: [String?] = []
+    /// Where each node is drawn right now, eased toward its seat.
+    private var positions: [String: NSPoint] = [:]
+    private var glide: Timer?
+    /// Samples that arrived while a readout was open, applied when it closes.
     private var pending: ([GraphNode], [pid_t: ProcessOwner])?
-    private var pointerInside = false
     private var hovered: Int?
 
     /// Click a node to inspect the process behind it.
@@ -31,26 +35,75 @@ final class ConnectionMapView: NSView {
     override var isFlipped: Bool { false }
 
     /// `immediate` is for changes the user just made — a filter toggle has to
-    /// take effect at once, even with the pointer resting over the map.
+    /// take effect at once, even mid-readout.
     func setNodes(_ n: [GraphNode], owners: [pid_t: ProcessOwner], immediate: Bool = false) {
-        // Otherwise hold still while the pointer is over the map: the thing
-        // being pointed at must not move out from under it.
-        guard immediate || !pointerInside else { pending = (n, owners); return }
+        // Otherwise hold still only while a node's readout is open: that node
+        // must not move out from under the pointer while it's being read.
+        // Merely having the pointer in the window is no reason to freeze.
+        guard immediate || hovered == nil else { pending = (n, owners); return }
         pending = nil
         apply(n, owners)
     }
 
     private func apply(_ n: [GraphNode], _ newOwners: [pid_t: ProcessOwner]) {
         let present = Set(n.map(\.address))
-        order.removeAll { !present.contains($0) }
-        // New hosts join in traffic order, behind everyone already seated.
-        for node in n.sorted(by: { $0.total > $1.total }) where !order.contains(node.address) {
-            order.append(node.address)
+        for i in seats.indices where seats[i].map({ !present.contains($0) }) ?? false {
+            seats[i] = nil
         }
+        let seated = Set(seats.compactMap { $0 })
+        // New hosts take the first free seat, busiest first.
+        for node in n.sorted(by: { $0.total > $1.total }) where !seated.contains(node.address) {
+            if let free = seats.firstIndex(where: { $0 == nil }) { seats[free] = node.address }
+            else { seats.append(node.address) }
+        }
+        // Compact once the ring is mostly gaps, which is the only time the
+        // reshuffle is worth the visual cost.
+        let empty = seats.filter { $0 == nil }.count
+        if empty > 2, empty > seats.count / 3 {
+            seats = seats.compactMap { $0 }.map { Optional($0) }
+        }
+
         let byAddress = Dictionary(n.map { ($0.address, $0) }, uniquingKeysWith: { a, _ in a })
-        nodes = order.compactMap { byAddress[$0] }
+        nodes = seats.compactMap { $0.flatMap { byAddress[$0] } }
         owners = newOwners
+        positions = positions.filter { present.contains($0.key) }
+        startGlide()
         needsDisplay = true
+    }
+
+    // MARK: - Movement
+
+    /// Nodes ease to their seats instead of teleporting. Runs only while
+    /// something is actually moving — a couple of hundred milliseconds after a
+    /// sample changes the ring, then stops.
+    private func startGlide() {
+        guard glide == nil else { return }
+        let t = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            self?.stepGlide()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        glide = t
+    }
+
+    private func stepGlide() {
+        guard window?.occlusionState.contains(.visible) == true else { return }
+        var moving = false
+        for (address, target) in targets {
+            let current = positions[address] ?? hubPoint
+            let dx = target.x - current.x, dy = target.y - current.y
+            if hypot(dx, dy) < 0.5 {
+                positions[address] = target
+                continue
+            }
+            moving = true
+            // Exponential ease: fast at first, settles without overshoot.
+            positions[address] = NSPoint(x: current.x + dx * 0.28, y: current.y + dy * 0.28)
+        }
+        needsDisplay = true
+        if !moving {
+            glide?.invalidate()
+            glide = nil
+        }
     }
 
     override init(frame frameRect: NSRect) {
@@ -64,7 +117,10 @@ final class ConnectionMapView: NSView {
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        glide?.invalidate()
+    }
 
     @objc private func lookupsResolved() { needsDisplay = true }
 
@@ -72,6 +128,14 @@ final class ConnectionMapView: NSView {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
     }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        // Snap to the new geometry rather than gliding across a resize.
+        positions = targets
+        needsDisplay = true
+    }
+
 
     // MARK: - Pointer
 
@@ -85,29 +149,29 @@ final class ConnectionMapView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        pointerInside = true
         mouseMoved(with: event)
     }
 
     override func mouseMoved(with event: NSEvent) {
-        pointerInside = true
         let p = convert(event.locationInWindow, from: nil)
         let hit = placements.firstIndex { hypot($0.center.x - p.x, $0.center.y - p.y) <= nodeRadius }
-        if hit != hovered {
-            hovered = hit
-            needsDisplay = true
-        }
+        guard hit != hovered else { return }
+        hovered = hit
+        if hit == nil { applyPending() }    // readout closed: catch up
+        needsDisplay = true
     }
 
     override func mouseExited(with event: NSEvent) {
-        pointerInside = false
         hovered = nil
-        if let (n, o) = pending {          // catch up on what we held back
-            pending = nil
-            apply(n, o)
-        } else {
-            needsDisplay = true
-        }
+        applyPending()
+        needsDisplay = true
+    }
+
+    /// Apply whatever arrived while a readout was open.
+    private func applyPending() {
+        guard let (n, o) = pending else { return }
+        pending = nil
+        apply(n, o)
     }
 
     /// A click on a node should work even when the map isn't the key window —
@@ -171,22 +235,18 @@ final class ConnectionMapView: NSView {
         }
 
         let light = effectiveAppearance.isLight
-        let hub = NSPoint(x: bounds.midX, y: bounds.midY)
-        // Leave room for a node and its label at the rim.
-        // Side labels need horizontal room; top and bottom ones need less.
-        let radius = max(90, min(bounds.width / 2 - nodeRadius - 190,
-                                 bounds.height / 2 - nodeRadius - 40))
+        let hub = hubPoint
         let peak = nodes.map(\.total).max() ?? 0
+        // A node new to the ring grows out of the hub rather than blinking in.
+        let points = nodes.map { positions[$0.address] ?? hub }
 
         // Edges first so the nodes sit on top of them.
         for (i, node) in nodes.enumerated() {
-            let p = point(at: i, of: nodes.count, hub: hub, radius: radius)
-            drawEdge(from: hub, to: p, node: node, peak: peak, light: light)
+            drawEdge(from: hub, to: points[i], node: node, peak: peak, light: light)
         }
         for (i, node) in nodes.enumerated() {
-            let p = point(at: i, of: nodes.count, hub: hub, radius: radius)
-            drawNode(node, at: p, light: light, index: i, hubCenter: hub)
-            placements.append((node, p))
+            drawNode(node, at: points[i], light: light, index: i, hubCenter: hub)
+            placements.append((node, points[i]))
         }
         drawHub(at: hub)
         drawLegend(light: light)
@@ -304,10 +364,28 @@ final class ConnectionMapView: NSView {
         }
     }
 
-    /// Clockwise from twelve o'clock, so the busiest host (first) is at the top.
-    private func point(at i: Int, of count: Int, hub: NSPoint, radius: CGFloat) -> NSPoint {
-        let angle = .pi / 2 - (CGFloat(i) / CGFloat(max(1, count))) * 2 * .pi
-        return NSPoint(x: hub.x + cos(angle) * radius, y: hub.y + sin(angle) * radius)
+    private var hubPoint: NSPoint { NSPoint(x: bounds.midX, y: bounds.midY) }
+
+    /// Side labels need horizontal room; top and bottom ones need less.
+    private var ringRadius: CGFloat {
+        max(90, min(bounds.width / 2 - nodeRadius - 190,
+                    bounds.height / 2 - nodeRadius - 40))
+    }
+
+    /// Where each address belongs: its seat's angle, clockwise from twelve
+    /// o'clock. Vacated seats still take up their slice, so the survivors
+    /// don't shuffle.
+    private var targets: [String: NSPoint] {
+        let hub = hubPoint, radius = ringRadius
+        let count = max(1, seats.count)
+        var result: [String: NSPoint] = [:]
+        for (i, seat) in seats.enumerated() {
+            guard let address = seat else { continue }
+            let angle = .pi / 2 - (CGFloat(i) / CGFloat(count)) * 2 * .pi
+            result[address] = NSPoint(x: hub.x + cos(angle) * radius,
+                                      y: hub.y + sin(angle) * radius)
+        }
+        return result
     }
 
     private func drawHub(at p: NSPoint) {

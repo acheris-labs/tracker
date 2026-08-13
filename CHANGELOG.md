@@ -26,7 +26,9 @@ auto-update prompt.
   their icons and pids, the connection count, byte totals and which side
   opened it — and the map holds still while the pointer is over it. Clicking
   opens that process's inspector; when several processes share a host, it
-  offers a pick list. Outgoing / Incoming / Unclear filter by which side
+  offers a pick list. Nodes glide to their places rather than jumping, hold
+  still while you're reading one, and a toolbar Pause holds the whole picture
+  for as long as you like. Outgoing / Incoming / Unclear filter by which side
   dialled, independently — "unclear" is a real state (UDP has no handshake to
   read, and a host can be dialled both ways), so it gets its own switch rather
   than being folded into one of the others.
@@ -75,6 +77,8 @@ auto-update prompt.
   app's override, since it's drawn on the Dock's own material.
 
 ### Fixed
+- The connection map stopped refreshing if the main window was closed while it
+  was open — it kept drawing a stale sample with no sign it had stopped.
 - **Other users' processes now show their real name and icon** in the process
   tabs. Their name came from the kernel's 16-character `p_comm` field with no
   executable path, so long names were cut ("AddressBookSourceSy…") and every
