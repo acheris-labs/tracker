@@ -22,6 +22,12 @@ auto-update prompt.
   flag, looked up through `whois` in the background and cached by netblock;
   LAN and loopback peers show a house instead, since they have no registry
   country.
+- **Map interaction.** Hovering a node names the processes behind it, with
+  their icons and pids, the connection count, byte totals and which side
+  opened it — and the map holds still while the pointer is over it. Clicking
+  opens that process's inspector; when several processes share a host, it
+  offers a pick list. A Both / Outgoing / Incoming control filters by which
+  side dialled.
 - **Hide Localhost / Hide LAN**, on both the map and the Connections table
   (checkboxes on the map, matching items in the "…" menu). Localhost starts
   hidden — traffic that never leaves the machine is rarely what you opened

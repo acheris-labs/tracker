@@ -32,9 +32,22 @@ enum ConnectionGraph {
     /// tell an outbound connection from an inbound one.
     static let ephemeralRange: ClosedRange<UInt16> = 49152...65535
 
+    /// Which side opened the connection, as a filter.
+    enum DirectionFilter: Int {
+        case all, outgoing, incoming
+        var label: String {
+            switch self {
+            case .all:      return "Both directions"
+            case .outgoing: return "Outgoing only"
+            case .incoming: return "Incoming only"
+            }
+        }
+    }
+
     static func nodes(from connections: [Connection],
                       hidingLoopback: Bool = false,
-                      hidingLAN: Bool = false) -> [GraphNode] {
+                      hidingLAN: Bool = false,
+                      direction: DirectionFilter = .all) -> [GraphNode] {
         // Ports we're listening on: a connection whose *local* port is one of
         // them was dialled by the other end.
         var listening: Set<UInt16> = []
@@ -70,9 +83,18 @@ enum ConnectionGraph {
             }
         }
 
-        // Every host, busiest first — collapsing the tail hid exactly the
-        // hosts you'd want to notice.
-        return byAddress.values.sorted { $0.total > $1.total }
+        // Direction filters on the folded node: a host we both dialled and
+        // were dialled by is `.unknown`, and stays out of both one-way views.
+        let kept = byAddress.values.filter { node in
+            switch direction {
+            case .all:      return true
+            case .outgoing: return node.origin == .weInitiated
+            case .incoming: return node.origin == .theyInitiated
+            }
+        }
+        // Busiest first — collapsing the tail hid exactly the hosts you'd
+        // want to notice.
+        return kept.sorted { $0.total > $1.total }
     }
 
     private static func origin(of c: Connection, listening: Set<UInt16>) -> Origin {

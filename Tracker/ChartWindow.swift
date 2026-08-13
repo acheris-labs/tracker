@@ -1022,6 +1022,9 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             controller.onScopeChange = { [weak self] in
                 self?.connectionList.hostNameDisplayChanged()
             }
+            controller.onInspect = { [weak self] pid in
+                self?.processList.openInspector(pid: pid)
+            }
             connectionMap = controller
         }
         connectionMap?.showWindow(nil)
@@ -1036,7 +1039,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         if sender.tag == 0 { ConnectionListView.hidesLoopback.toggle() }
         else               { ConnectionListView.hidesLAN.toggle() }
         connectionList.hostNameDisplayChanged()   // re-filters and redraws
-        connectionMap?.rebuild()
+        connectionMap?.rebuild(immediate: true)
     }
 
     private static func axisLabel(_ s: String, alignment: NSTextAlignment) -> NSTextField {
