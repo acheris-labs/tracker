@@ -11,7 +11,7 @@ import AppKit
 /// flag and the defaults namespace differ.
 final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private enum SortKey: String {
-        case process, pid, user, proto, laddr, lport, rhost, rport, state, rcvd, sent
+        case process, pid, user, proto, laddr, lport, rhost, rport, country, state, rcvd, sent
     }
 
     private let table = NSTableView()
@@ -56,9 +56,10 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         applySavedColumns()
         table.sortDescriptors = [NSSortDescriptor(key: sortKey.rawValue,
                                                   ascending: sortAscending)]
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(hostsResolved),
-            name: HostResolver.resolved, object: nil)
+        for name in [HostResolver.resolved, GeoResolver.resolved] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(hostsResolved), name: name, object: nil)
+        }
         showPlaceholder("No connections")
     }
 
@@ -107,7 +108,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         }
         let matches = filter.isEmpty ? visible : visible.filter { c in
             let fields = [processLabel(c), "\(c.pid)", owner(c.pid)?.user ?? "",
-                          c.proto.label, c.localAddr,
+                          countryText(c), c.proto.label, c.localAddr,
                           "\(c.localPort)", remoteHost(c), c.remoteAddr,
                           "\(c.remotePort)", ConnectionSampler.stateLabel(c.state)]
             // c.remoteAddr is already in the list above, so typing an IP finds
@@ -125,6 +126,24 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         } else {
             hidePlaceholder()
         }
+    }
+
+    /// Flag plus code for a public address, a house for anything on this
+    /// network (RFC1918, loopback, or their IPv6 equivalents), blank while a
+    /// lookup is still out.
+    ///
+    /// `kick` starts a lookup when the answer isn't known yet. Only cell
+    /// drawing does that — sorting and filtering visit every row, including
+    /// hundreds that will never be on screen.
+    private func countryText(_ c: Connection, kick: Bool = false) -> String {
+        guard !c.remoteAddr.isEmpty else { return "" }
+        if ConnectionGraph.isPrivate(c.remoteAddr) { return "🏠" }
+        let code = kick
+            ? GeoResolver.shared.countryCode(for: c.remoteAddr)
+            : GeoResolver.shared.cachedCountryCode(for: c.remoteAddr)
+        guard let code else { return "" }
+        let flag = GeoResolver.flag(code)
+        return flag.isEmpty ? code : "\(flag) \(code)"
     }
 
     /// Full process name where we have it: netstat truncates to 16 characters,
@@ -245,6 +264,11 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
                   alignment: .left)
         addColumn(id: "rport", title: "Remote Port", width: 94, key: .rport,
                   alignment: .right)
+        if showProcess {
+            // Same lookup the map uses, so "Look Up Countries" governs both.
+            addColumn(id: "country", title: "Country", width: 74, key: .country,
+                      alignment: .left)
+        }
         addColumn(id: "state", title: "State", width: 80, key: .state, alignment: .left)
         if showProcess {
             // netstat carries per-connection counters; libproc doesn't, so
@@ -430,6 +454,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         // Sort on what's displayed, so resolved names group together.
         case .rhost:   return byText { self.remoteHost($0) }
         case .rport:   return by { $0.remotePort }
+        case .country: return byText { self.countryText($0) }
         case .state:   return byText { ConnectionSampler.stateLabel($0.state) }
         case .rcvd:    return by { $0.rxBytes ?? -1 }
         case .sent:    return by { $0.txBytes ?? -1 }
@@ -493,7 +518,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
 
     @objc private func hostsResolved() {
         guard !rows.isEmpty else { return }
-        if sortKey == .rhost { rows = sorted(rows) }
+        if sortKey == .rhost || sortKey == .country { rows = sorted(rows) }
         reloadPreservingSelection()
     }
 
@@ -541,6 +566,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         case "lport":   return c.localPort == 0 ? "—" : "\(c.localPort)"
         case "rhost":   return remoteHost(c)
         case "rport":   return c.remotePort == 0 ? "—" : "\(c.remotePort)"
+        case "country": return countryText(c, kick: true)
         case "state":   return ConnectionSampler.stateLabel(c.state)
         case "rcvd":    return c.rxBytes.map(F.formatTotal) ?? "—"
         case "sent":    return c.txBytes.map(F.formatTotal) ?? "—"

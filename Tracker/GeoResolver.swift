@@ -22,10 +22,17 @@ final class GeoResolver {
         set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
     }
 
-    /// Two-letter code, or nil for "looked up, no answer". Keyed by address.
+    /// Two-letter code, or nil for "looked up, no answer". Keyed by address,
+    /// bounded: a busy machine cycles through thousands of addresses over a
+    /// session and there's no reason to remember all of them forever.
     private var cache: [String: String?] = [:]
+    /// Least-recently-used first; the eviction order for `cache`.
+    private var recency: [String] = []
+    private let cacheLimit = 512
     /// Netblocks already answered: one whois covers every address inside.
+    /// Also bounded, oldest dropped first.
     private var blocks: [(range: ClosedRange<UInt32>, code: String?)] = []
+    private let blockLimit = 256
     private var inFlight: Set<String> = []
     private var notifyScheduled = false
 
@@ -34,13 +41,29 @@ final class GeoResolver {
                                       qos: .utility, attributes: .concurrent)
     private let slots = DispatchSemaphore(value: 2)
 
-    /// Main thread only. Returns a cached country code, or nil while unknown.
-    func countryCode(for ip: String) -> String? {
-        guard Self.isEnabled, !ip.isEmpty, !ConnectionGraph.isPrivate(ip) else { return nil }
-        if let cached = cache[ip] { return cached }
+    /// Main thread only. What we already know, without starting a lookup —
+    /// for sorting and filtering, which touch every row including ones that
+    /// will never be drawn.
+    func cachedCountryCode(for ip: String) -> String? {
+        guard Self.isEnabled, !ip.isEmpty else { return nil }
+        if let cached = cache[ip] { touch(ip); return cached }
         if let v4 = Self.ipv4Value(ip),
            let hit = blocks.first(where: { $0.range.contains(v4) }) {
-            cache[ip] = hit.code
+            remember(ip, hit.code)
+            return hit.code
+        }
+        return nil
+    }
+
+    /// Main thread only. Returns a cached country code, or nil while unknown —
+    /// starting a lookup on the first ask. Called from cell drawing, so only
+    /// addresses actually on screen cost anything.
+    func countryCode(for ip: String) -> String? {
+        guard Self.isEnabled, !ip.isEmpty, !ConnectionGraph.isPrivate(ip) else { return nil }
+        if let cached = cache[ip] { touch(ip); return cached }
+        if let v4 = Self.ipv4Value(ip),
+           let hit = blocks.first(where: { $0.range.contains(v4) }) {
+            remember(ip, hit.code)
             return hit.code
         }
         guard inFlight.insert(ip).inserted else { return nil }
@@ -51,12 +74,32 @@ final class GeoResolver {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.inFlight.remove(ip)
-                self.cache[ip] = result.code
-                if let range = result.range { self.blocks.append((range, result.code)) }
+                self.remember(ip, result.code)
+                if let range = result.range {
+                    self.blocks.append((range, result.code))
+                    if self.blocks.count > self.blockLimit { self.blocks.removeFirst() }
+                }
                 self.scheduleNotify()
             }
         }
         return nil
+    }
+
+    /// Insert or refresh an entry, evicting the least recently used once the
+    /// cache is full.
+    private func remember(_ ip: String, _ code: String?) {
+        if cache.index(forKey: ip) == nil { recency.append(ip) } else { touch(ip) }
+        cache[ip] = code
+        while recency.count > cacheLimit {
+            let oldest = recency.removeFirst()
+            cache.removeValue(forKey: oldest)
+        }
+    }
+
+    private func touch(_ ip: String) {
+        guard let i = recency.firstIndex(of: ip) else { return }
+        recency.remove(at: i)
+        recency.append(ip)
     }
 
     /// The flag for a code, as regional indicator symbols — no asset needed.

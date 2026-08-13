@@ -194,12 +194,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(clamped, forKey: "ProcessRefreshSeconds")
     }
 
-    @objc func openActivityMonitor(_ sender: Any?) {
-        let url = URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")
-        NSWorkspace.shared.openApplication(at: url,
-                                           configuration: NSWorkspace.OpenConfiguration())
-    }
-
     /// Standard macOS About panel, styled to match Newt: name, version, and
     /// copyright (`NSHumanReadableCopyright`) come from the bundle; we supply the
     /// MIT license + no-warranty note as the credits blurb. The dock icon is a
@@ -309,12 +303,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                  keyEquivalent: "")
         mapItem.target = self
         menu.addItem(mapItem)
-
-        let amItem = NSMenuItem(title: "Open Activity Monitor",
-                                action: #selector(openActivityMonitor(_:)),
-                                keyEquivalent: "")
-        amItem.target = self
-        menu.addItem(amItem)
 
         return menu
     }

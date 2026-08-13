@@ -36,6 +36,11 @@ auto-update prompt.
   dialled, independently — "unclear" is a real state (UDP has no handshake to
   read, and a host can be dialled both ways), so it gets its own switch rather
   than being folded into one of the others.
+- **Country column** in the Connections table, sortable, showing the flag and
+  code for public addresses and a house for anything on this network. It uses
+  the same lookup as the map, so "Look Up Countries" now governs both — it
+  previously only affected the map, which made the menu item look broken from
+  the table.
 - **Hide Localhost / Hide LAN / Hide Remote**, on both the map and the
   Connections table, in the "…" menu on each. They compose, so any slice
   works — hiding remote leaves just this machine and the network around it.
@@ -80,6 +85,9 @@ auto-update prompt.
   traces like Memory and Network stay readable; custom colors get the same
   treatment. The dock icon keeps following System Settings rather than the
   app's override, since it's drawn on the Dock's own material.
+
+### Changed
+- The dock menu drops "Open Activity Monitor".
 
 ### Fixed
 - The connection map stopped refreshing if the main window was closed while it
