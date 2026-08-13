@@ -11,7 +11,8 @@ import AppKit
 /// flag and the defaults namespace differ.
 final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private enum SortKey: String {
-        case process, pid, user, proto, laddr, lport, rhost, rport, country, state, rcvd, sent
+        case process, pid, user, proto, laddr, lport, rhost, rport, country
+        case direction, state, rcvd, sent
     }
 
     private let table = NSTableView()
@@ -35,6 +36,11 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     private var isFittingColumns = false
     /// True while showing a "can't read this" message rather than rows.
     private var unavailable = false
+    /// Ports we're listening on, from the whole sample. One connection's
+    /// direction can't be read from that connection alone, and sorting and
+    /// filtering ask for every row's direction, so it's built once per sample
+    /// rather than per cell.
+    private var listeningPorts: Set<UInt16> = []
 
     private var widthsKey: String  { "ConnectionColumnWidths.\(defaultsKey)" }
     private var hiddenKey: String  { "ConnectionColumnsHidden.\(defaultsKey)" }
@@ -86,7 +92,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         // Ahead of the no-op check below: the footer graph advances one sample
         // per tick whether or not the socket list changed, or an idle machine
         // would draw a frozen line rather than a flat one.
-        footerUpdate?(connections)
+        footerUpdate?(inScope(connections))
         let incoming = Set(connections)
         // Identity alone isn't enough once byte counters are in play, but they
         // are excluded from ==, so diff them separately rather than reloading
@@ -98,6 +104,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         shownBytes = bytes
         owners = processNames
         all = connections
+        listeningPorts = ConnectionGraph.listeningPorts(in: connections)
         applyFilterAndSort()
     }
 
@@ -110,19 +117,25 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         applyFilterAndSort()
     }
 
-    private func applyFilterAndSort() {
-        // Listeners (no remote) always stay: they aren't traffic, and hiding
-        // them would make "what am I exposing" unanswerable.
-        let visible = all.filter { c in
+    /// Hide Localhost / LAN / Remote, the persistent scope shared with the map.
+    ///
+    /// Listeners (no remote) always stay: they aren't traffic, and hiding them
+    /// would make "what am I exposing" unanswerable.
+    private func inScope(_ c: [Connection]) -> [Connection] {
+        c.filter { c in
             if c.remoteAddr.isEmpty { return true }
             if Self.hidesLoopback, ConnectionGraph.isLoopback(c.remoteAddr) { return false }
             if Self.hidesLAN, ConnectionGraph.isLAN(c.remoteAddr) { return false }
             if Self.hidesRemote, !ConnectionGraph.isPrivate(c.remoteAddr) { return false }
             return true
         }
+    }
+
+    private func applyFilterAndSort() {
+        let visible = inScope(all)
         let matches = filter.isEmpty ? visible : visible.filter { c in
             let fields = [processLabel(c), "\(c.pid)", owner(c.pid)?.user ?? "",
-                          countryText(c), c.proto.label, c.localAddr,
+                          countryText(c), directionText(c), c.proto.label, c.localAddr,
                           "\(c.localPort)", remoteHost(c), c.remoteAddr,
                           "\(c.remotePort)", ConnectionSampler.stateLabel(c.state)]
             // c.remoteAddr is already in the list above, so typing an IP finds
@@ -151,6 +164,17 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         guard let code = GeoDatabase.countryCode(for: c.remoteAddr) else { return "" }
         let flag = GeoDatabase.flag(code)
         return flag.isEmpty ? code : "\(flag) \(code)"
+    }
+
+    /// Which end opened the connection, by the same rule that points the map's
+    /// arrowheads. Listeners get a dash: nobody has dialled anything yet.
+    private func directionText(_ c: Connection) -> String {
+        guard !c.remoteAddr.isEmpty, c.state != TSI_S_LISTEN else { return "—" }
+        switch ConnectionGraph.origin(of: c, listening: listeningPorts) {
+        case .weInitiated:   return "Outgoing"
+        case .theyInitiated: return "Incoming"
+        case .unknown:       return "Unclear"
+        }
     }
 
     /// Full process name where we have it: netstat truncates to 16 characters,
@@ -269,19 +293,22 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
                   alignment: .right)
         addColumn(id: "rhost", title: "Remote Host", width: 190, key: .rhost,
                   alignment: .left)
-        addColumn(id: "rport", title: "Remote Port", width: 94, key: .rport,
+        addColumn(id: "rport", title: "Remote Port", width: 80, key: .rport,
                   alignment: .right)
         if showProcess {
             // Same table the map reads, so "Show Countries" governs both.
-            addColumn(id: "country", title: "Country", width: 74, key: .country,
+            addColumn(id: "country", title: "Country", width: 64, key: .country,
                       alignment: .left)
         }
-        addColumn(id: "state", title: "State", width: 80, key: .state, alignment: .left)
+        // Which end opened it, by the same rule the map's arrowheads use.
+        addColumn(id: "dir", title: "Direction", width: 76, key: .direction,
+                  alignment: .left)
+        addColumn(id: "state", title: "State", width: 88, key: .state, alignment: .left)
         if showProcess {
             // netstat carries per-connection counters; libproc doesn't, so
             // these only appear in the system-wide view.
-            addColumn(id: "rcvd", title: "Rcvd", width: 74, key: .rcvd, alignment: .right)
-            addColumn(id: "sent", title: "Sent", width: 74, key: .sent, alignment: .right)
+            addColumn(id: "rcvd", title: "Rcvd", width: 68, key: .rcvd, alignment: .right)
+            addColumn(id: "sent", title: "Sent", width: 68, key: .sent, alignment: .right)
         }
 
         for col in table.tableColumns { col.resizingMask = [.userResizingMask] }
@@ -346,8 +373,10 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
     /// Three panes matching the process tabs': who dialled whom, that same
     /// split over time, and what the sockets are.
     ///
-    /// Counts are of *every* connection on the machine, not the filtered rows.
-    /// A footer that moved when you typed in the search field would be
+    /// Counts cover what the table is showing you — Hide Localhost and friends
+    /// apply, or the footer would report incoming connections on a table with
+    /// none in it. The search field is deliberately *not* applied: that's a
+    /// transient lookup, and a summary that moved as you typed would be
     /// answering a different question from the one it looks like it answers.
     private func buildFooterPanes(_ bar: FooterBar) {
         // Outbound red, inbound blue — the same way round as the Disk tab's
@@ -542,6 +571,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         case .rhost:   return byText { self.remoteHost($0) }
         case .rport:   return by { $0.remotePort }
         case .country: return byText { self.countryText($0) }
+        case .direction: return byText { self.directionText($0) }
         case .state:   return byText { ConnectionSampler.stateLabel($0.state) }
         case .rcvd:    return by { $0.rxBytes ?? -1 }
         case .sent:    return by { $0.txBytes ?? -1 }
@@ -595,7 +625,13 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
 
     /// Re-render after a display setting is toggled (host names also change
     /// the sort order, since that column sorts on what's displayed).
-    func hostNameDisplayChanged() { applyFilterAndSort() }
+    func hostNameDisplayChanged() {
+        // Also covers the scope toggles, which change what the footer counts —
+        // waiting for the next sample would leave it a second out of step with
+        // the rows.
+        footerUpdate?(inScope(all))
+        applyFilterAndSort()
+    }
 
     private func remoteHost(_ c: Connection) -> String {
         guard !c.remoteAddr.isEmpty else { return "—" }
@@ -654,6 +690,7 @@ final class ConnectionListView: NSView, NSTableViewDataSource, NSTableViewDelega
         case "rhost":   return remoteHost(c)
         case "rport":   return c.remotePort == 0 ? "—" : "\(c.remotePort)"
         case "country": return countryText(c)
+        case "dir":     return directionText(c)
         case "state":   return ConnectionSampler.stateLabel(c.state)
         case "rcvd":    return c.rxBytes.map(F.formatTotal) ?? "—"
         case "sent":    return c.txBytes.map(F.formatTotal) ?? "—"

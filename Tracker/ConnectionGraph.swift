@@ -105,14 +105,22 @@ enum ConnectionGraph {
         return kept.sorted { $0.total > $1.total }
     }
 
+    /// The local ports we're listening on. Deciding one connection's origin
+    /// needs the whole sample, so callers building this per row should hoist
+    /// it out of the loop.
+    static func listeningPorts(in connections: [Connection]) -> Set<UInt16> {
+        var ports: Set<UInt16> = []
+        for c in connections where c.state == TSI_S_LISTEN {
+            ports.insert(c.localPort)
+        }
+        return ports
+    }
+
     /// How many established connections each side opened. Listeners are left
     /// out: they have no peer, so nobody has dialled anything yet.
     static func originCounts(of connections: [Connection])
     -> (outgoing: Int, incoming: Int, unclear: Int) {
-        var listening: Set<UInt16> = []
-        for c in connections where c.state == TSI_S_LISTEN {
-            listening.insert(c.localPort)
-        }
+        let listening = listeningPorts(in: connections)
         var out = 0, incoming = 0, unclear = 0
         for c in connections where !c.remoteAddr.isEmpty && c.state != TSI_S_LISTEN {
             switch origin(of: c, listening: listening) {
@@ -124,7 +132,7 @@ enum ConnectionGraph {
         return (out, incoming, unclear)
     }
 
-    private static func origin(of c: Connection, listening: Set<UInt16>) -> Origin {
+    static func origin(of c: Connection, listening: Set<UInt16>) -> Origin {
         // Landed on a port we're listening on: they dialled us.
         if listening.contains(c.localPort) { return .theyInitiated }
         let localEphemeral = ephemeralRange.contains(c.localPort)
