@@ -392,9 +392,12 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     private let tabs = RightClickableTabView()
     // The lists lead and the chart trails: the tabs you act on are the ones
     // you reach for, and Chart is where you land by default anyway.
+    /// Segment order, which is also ⌘1…⌘7 order — the app menu builds its
+    /// shortcuts from this list so the two can't drift apart.
+    static let tabTitles = ["CPU", "Memory", "Energy", "Disk", "Network",
+                            "Connections", "Visualizations"]
     private let selector = NSSegmentedControl(
-        labels: ["CPU", "Memory", "Energy", "Disk", "Network", "Connections",
-                 "Visualizations"],
+        labels: ChartWindowController.tabTitles,
         trackingMode: .selectOne, target: nil, action: nil)
     private weak var renderer: HistoryRenderer?
     private let hasBattery: Bool
@@ -978,10 +981,9 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
-    // Menu-driven selection (⌘1 / ⌘2 from the app's Window menu).
-    @objc func selectChartTab(_ sender: Any?)     { applySelection(ChartIndex.value) }
-    @objc func selectProcessesTab(_ sender: Any?) { applySelection(0) }   // CPU category
-    @objc func selectConnectionsTab(_ sender: Any?) { applySelection(ConnectionsIndex.value) }
+    /// Select by segment index — what the ⌘1…⌘7 menu items drive, so the
+    /// shortcuts and the tab strip can't drift apart.
+    func selectTab(index: Int) { applySelection(index) }
 
     @objc private func selectorChanged(_ s: NSSegmentedControl) {
         applySelection(s.selectedSegment)
