@@ -62,8 +62,9 @@ final class ConnectionMapView: NSView, NSViewToolTipOwner {
         let light = effectiveAppearance.isLight
         let hub = NSPoint(x: bounds.midX, y: bounds.midY)
         // Leave room for a node and its label at the rim.
-        let labelDepth: CGFloat = nodes.count > 14 ? 96 : 46
-        let radius = max(90, min(bounds.width, bounds.height) / 2 - nodeRadius - labelDepth)
+        // Side labels need horizontal room; top and bottom ones need less.
+        let radius = max(90, min(bounds.width / 2 - nodeRadius - 190,
+                                 bounds.height / 2 - nodeRadius - 40))
         let peak = nodes.map(\.total).max() ?? 0
 
         // Edges first so the nodes sit on top of them.
@@ -73,7 +74,7 @@ final class ConnectionMapView: NSView, NSViewToolTipOwner {
         }
         for (i, node) in nodes.enumerated() {
             let p = point(at: i, of: nodes.count, hub: hub, radius: radius)
-            drawNode(node, at: p, light: light, index: i)
+            drawNode(node, at: p, light: light, index: i, hubCenter: hub)
             placements.append((node, p))
             addToolTip(NSRect(x: p.x - nodeRadius, y: p.y - nodeRadius,
                               width: nodeRadius * 2, height: nodeRadius * 2),
@@ -176,7 +177,8 @@ final class ConnectionMapView: NSView, NSViewToolTipOwner {
         path.fill()
     }
 
-    private func drawNode(_ node: GraphNode, at p: NSPoint, light: Bool, index: Int) {
+    private func drawNode(_ node: GraphNode, at p: NSPoint, light: Bool,
+                          index: Int, hubCenter: NSPoint) {
         let r = nodeRadius
         let rect = NSRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)
         let disc = NSBezierPath(ovalIn: rect)
@@ -196,17 +198,13 @@ final class ConnectionMapView: NSView, NSViewToolTipOwner {
         else                          { inside = "🌐" }
         drawCentered(inside, in: rect, size: node.isOverflow ? 12 : 15)
 
-        // Below it: the host and the port it's talking to, then the totals.
+        // Host and totals sit just outside the disc, along the spoke — a
+        // fixed offset below each node put some labels closer to their
+        // neighbour than to their own node.
         let title = node.isOverflow ? "more hosts" : label(for: node)
         let port = node.isOverflow || node.port == 0 ? "" : ":\(node.port)"
         let totals = "↓\(F.formatTotal(node.rxBytes))  ↑\(F.formatTotal(node.txBytes))"
-        // Three depths: at 30 hosts the circle gives each label ~80pt of arc
-        // and they run 200pt wide, so alternating two rows still collides.
-        let stagger: CGFloat = nodes.count > 14 ? CGFloat(index % 3) * 26 : 0
-        drawLabel(Self.shorten(title) + port, below: rect, offset: 4 + stagger,
-                  size: 11, color: .labelColor)
-        drawLabel(totals, below: rect, offset: 18 + stagger,
-                  size: 10, color: .secondaryLabelColor)
+        drawRadialLabel(Self.shorten(title) + port, totals, at: p, hub: hubCenter)
     }
 
     private typealias F = ProcessListView
@@ -248,14 +246,41 @@ final class ConnectionMapView: NSView, NSViewToolTipOwner {
                            y: rect.midY - bounds.height / 2), withAttributes: attrs)
     }
 
-    /// Centred under a node, clamped so rim labels don't run off the view.
-    private func drawLabel(_ s: String, below rect: NSRect, offset: CGFloat,
-                           size: CGFloat, color: NSColor) {
-        let attrs = attributes(size, color, .regular)
-        let textSize = s.size(withAttributes: attrs)
-        var x = rect.midX - textSize.width / 2
-        x = max(2, min(x, bounds.maxX - textSize.width - 2))
-        s.draw(at: NSPoint(x: x, y: rect.minY - offset - textSize.height), withAttributes: attrs)
+    /// Two lines placed outside the node, on the far side from the hub, so a
+    /// label is always nearer its own node than any other. Nodes to the right
+    /// read left-to-right away from the centre; nodes to the left mirror it;
+    /// nodes near the top and bottom centre themselves.
+    private func drawRadialLabel(_ title: String, _ totals: String,
+                                 at p: NSPoint, hub: NSPoint) {
+        let titleAttrs = attributes(11, .labelColor, .regular)
+        let totalAttrs = attributes(10, .secondaryLabelColor, .regular)
+        let titleSize = title.size(withAttributes: titleAttrs)
+        let totalSize = totals.size(withAttributes: totalAttrs)
+        let block = NSSize(width: max(titleSize.width, totalSize.width),
+                           height: titleSize.height + totalSize.height + 1)
+
+        let dx = p.x - hub.x, dy = p.y - hub.y
+        let len = max(1, sqrt(dx * dx + dy * dy))
+        let ux = dx / len, uy = dy / len
+        let gap = nodeRadius + 6
+
+        var origin: NSPoint
+        if abs(ux) < 0.2 {                        // only the true top and bottom
+            // Drift with the spoke so two near-vertical neighbours don't
+            // centre on top of each other.
+            origin = NSPoint(x: p.x - block.width / 2 + ux * block.width * 0.9,
+                             y: uy >= 0 ? p.y + gap : p.y - gap - block.height)
+        } else if ux > 0 {                        // right side: text runs right
+            origin = NSPoint(x: p.x + gap, y: p.y - block.height / 2)
+        } else {                                  // left side: text ends at the node
+            origin = NSPoint(x: p.x - gap - block.width, y: p.y - block.height / 2)
+        }
+        origin.x = max(4, min(origin.x, bounds.maxX - block.width - 4))
+        origin.y = max(4, min(origin.y, bounds.maxY - block.height - 4))
+
+        totals.draw(at: origin, withAttributes: totalAttrs)
+        title.draw(at: NSPoint(x: origin.x, y: origin.y + totalSize.height + 1),
+                   withAttributes: titleAttrs)
     }
 
     // MARK: - Tooltips
