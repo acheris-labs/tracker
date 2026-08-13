@@ -12,7 +12,9 @@ auto-update prompt.
 ## [Unreleased]
 
 ### Added
-- **Connection Map.** "…" › Connection Map on the Connections tab opens a
+- **Connection Map.** "…" › Connection Map on the Connections tab — or
+  Connection Map… in the dock icon's right-click menu, which opens it on its
+  own without dragging the main window along — shows a
   radial view: this Mac at the centre, every host it's talking to around it,
   and edges weighted by how much data crossed them (logarithmically, so a
   600 MB upload and a 4 KB poll can share one picture). Blue edges are mostly

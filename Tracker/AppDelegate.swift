@@ -125,6 +125,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chart?.selectProcessesTab(nil)
     }
 
+    /// Straight to the map from the dock menu. The chart window owns it, so
+    /// that has to exist — but it stays where it was rather than being shoved
+    /// in front of whatever you were doing.
+    @objc func showConnectionMapFromDock(_ sender: Any?) {
+        let hadWindow = chart?.window?.isVisible ?? false
+        ensureChartWindow()
+        if !hadWindow { chart?.window?.orderOut(nil) }
+        NSApp.activate()
+        chart?.showConnectionMap(nil)
+        pushConnections()
+    }
+
     @objc func showConnectionsTab(_ sender: Any?) {
         ensureChartWindow()
         chart?.selectConnectionsTab(nil)
@@ -291,6 +303,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    keyEquivalent: "")
         prefsItem.target = self
         menu.addItem(prefsItem)
+
+        let mapItem = NSMenuItem(title: "Connection Map…",
+                                 action: #selector(showConnectionMapFromDock(_:)),
+                                 keyEquivalent: "")
+        mapItem.target = self
+        menu.addItem(mapItem)
 
         let amItem = NSMenuItem(title: "Open Activity Monitor",
                                 action: #selector(openActivityMonitor(_:)),

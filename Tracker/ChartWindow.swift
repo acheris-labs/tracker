@@ -1022,7 +1022,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         return pane == .connections && (window?.isVisible ?? false)
     }
 
-    @objc private func showConnectionMap(_ sender: Any?) {
+    @objc func showConnectionMap(_ sender: Any?) {
         if connectionMap == nil {
             let controller = ConnectionMapWindowController()
             controller.onClose = { [weak self] in self?.connectionMap = nil }
