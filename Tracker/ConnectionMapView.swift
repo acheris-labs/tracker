@@ -346,22 +346,23 @@ final class ConnectionMapView: NSView {
 
     /// Nothing about colour or arrow direction is guessable, so say it.
     private func drawLegend(light: Bool) {
-        let entries: [(NSColor, String)] = [
-            (Self.inboundColor.onSurface(light: light), "mostly received"),
-            (Self.outboundColor.onSurface(light: light), "mostly sent"),
-        ]
-        var y = bounds.minY + 12
         let attrs = attributes(10, .secondaryLabelColor, .regular)
+        var y = bounds.minY + 12
         ("arrow points the way the connection was opened; none = unclear" as NSString)
             .draw(at: NSPoint(x: 14, y: y), withAttributes: attrs)
-        y += 15
-        for (color, text) in entries.reversed() {
-            let swatch = NSRect(x: 14, y: y + 3, width: 18, height: 3)
-            color.setFill()
-            NSBezierPath(roundedRect: swatch, xRadius: 1.5, yRadius: 1.5).fill()
-            (text as NSString).draw(at: NSPoint(x: 38, y: y), withAttributes: attrs)
-            y += 15
+        y += 16
+
+        // The scale itself: colour is now a ratio, not a category.
+        let received = "received" as NSString
+        let sent = "sent" as NSString
+        let receivedWidth = received.size(withAttributes: attrs).width
+        received.draw(at: NSPoint(x: 14, y: y), withAttributes: attrs)
+        let bar = NSRect(x: 14 + receivedWidth + 6, y: y + 3, width: 90, height: 4)
+        for x in stride(from: 0, to: bar.width, by: 1) {
+            Self.edgeColor(rx: Double(bar.width - x), tx: Double(x), light: light).setFill()
+            NSRect(x: bar.minX + x, y: bar.minY, width: 1.5, height: bar.height).fill()
         }
+        sent.draw(at: NSPoint(x: bar.maxX + 6, y: y), withAttributes: attrs)
     }
 
     private var hubPoint: NSPoint { NSPoint(x: bounds.midX, y: bounds.midY) }
@@ -406,10 +407,33 @@ final class ConnectionMapView: NSView {
     private static let inboundColor = NSColor(srgbRed: 0.20, green: 0.58, blue: 1.00, alpha: 1)
     private static let outboundColor = NSColor(srgbRed: 1.00, green: 0.32, blue: 0.30, alpha: 1)
 
+    /// Blue for all-received through violet at even to red for all-sent.
+    /// A hard switch at the halfway mark drew 51/49 exactly like 99/1;
+    /// interpolating the hue makes the balance itself readable. Hue rather
+    /// than a straight RGB blend, which greys out through the middle.
+    static func edgeColor(rx: Double, tx: Double, light: Bool) -> NSColor {
+        let total = rx + tx
+        let t = CGFloat(total > 0 ? tx / total : 0.5)   // 0 = received, 1 = sent
+        guard let a = inboundColor.usingColorSpace(.sRGB),
+              let b = outboundColor.usingColorSpace(.sRGB) else { return inboundColor }
+        var ha: CGFloat = 0, sa: CGFloat = 0, ba: CGFloat = 0, aa: CGFloat = 0
+        var hb: CGFloat = 0, sb: CGFloat = 0, bb: CGFloat = 0, ab: CGFloat = 0
+        a.getHue(&ha, saturation: &sa, brightness: &ba, alpha: &aa)
+        b.getHue(&hb, saturation: &sb, brightness: &bb, alpha: &ab)
+        // Red sits just above hue 0, so interpolating straight down from blue
+        // detours through green and yellow. Go the short way instead — up
+        // through violet and magenta — by unwrapping the destination hue.
+        let target = hb < ha ? hb + 1 : hb
+        let hue = (ha + (target - ha) * t).truncatingRemainder(dividingBy: 1)
+        let color = NSColor(hue: hue,
+                            saturation: sa + (sb - sa) * t,
+                            brightness: ba + (bb - ba) * t, alpha: 1)
+        return color.onSurface(light: light)
+    }
+
     private func drawEdge(from hub: NSPoint, to p: NSPoint, node: GraphNode,
                           peak: Double, light: Bool) {
-        let inbound = node.rxBytes >= node.txBytes
-        let color = (inbound ? Self.inboundColor : Self.outboundColor).onSurface(light: light)
+        let color = Self.edgeColor(rx: node.rxBytes, tx: node.txBytes, light: light)
 
         // Start and end outside the two discs so the line reads as a link
         // rather than a spoke through them.

@@ -17,8 +17,10 @@ auto-update prompt.
   own without dragging the main window along — shows a
   radial view: this Mac at the centre, every host it's talking to around it,
   and edges weighted by how much data crossed them (logarithmically, so a
-  600 MB upload and a 4 KB poll can share one picture). Blue edges are mostly
-  inbound, orange mostly outbound, and the arrowhead points the way the
+  600 MB upload and a 4 KB poll can share one picture). Edge colour is the
+  send/receive ratio on a continuous blue-violet-red scale rather than a
+  category, so an even split reads as even instead of flipping at 50%. The
+  arrowhead points the way the
   connection was opened — worked out from which end holds the ephemeral port,
   or which end's port we're listening on. Public hosts carry their country
   flag, looked up through `whois` in the background and cached by netblock;
