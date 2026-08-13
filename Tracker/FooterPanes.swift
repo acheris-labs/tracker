@@ -6,7 +6,7 @@ import AppKit
 /// One bordered, rounded footer pane. `height` nil hugs the content (used by
 /// the Chart tab's legend panes, whose row counts differ).
 final class FooterPane: NSView {
-    init(content: NSView, minWidth: CGFloat = 190,
+    init(content: NSView, minWidth: CGFloat = 200,
          height: CGFloat? = Theme.footerPaneHeight) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -17,8 +17,8 @@ final class FooterPane: NSView {
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
         var constraints = [
-            content.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
             content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth),
@@ -89,7 +89,9 @@ final class FooterStatGrid: NSView {
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .width
-        stack.spacing = 2
+        // Enough air that the rows use the pane rather than huddling in the
+        // middle of it — the boxes follow Activity Monitor's proportions now.
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         var constraints = [
@@ -147,7 +149,7 @@ final class FooterGraphView: NSView {
         NSLayoutConstraint.activate([
             captionLabel.topAnchor.constraint(equalTo: topAnchor),
             captionLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 170),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
         ])
     }
 
