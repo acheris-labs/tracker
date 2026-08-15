@@ -9,7 +9,7 @@ GitHub release body and as the link target for Sparkle's release notes, so
 write each entry as if it were the changelog the user reads in the
 auto-update prompt.
 
-## [Unreleased]
+## [0.4.0] - 2026-08-13
 
 ### Added
 - **Connection Map.** "…" › Connection Map on the Connections tab — or
@@ -48,14 +48,20 @@ auto-update prompt.
 - **A footer on the Connections tab**, matching the process tabs: how many
   connections each side opened (outgoing, incoming, and the unclear ones), the
   same split graphed over time, and what the sockets are — TCP, UDP, and how
-  many are listening. It counts every connection on the machine, not the rows
-  left after a search, so it answers the same question whatever you've typed.
+  many are listening. It counts what the table is showing — the Hide
+  Localhost/LAN/Remote scope applies — but not the search field, so a summary
+  doesn't shift under you as you type a filter.
 - **Hide Localhost / Hide LAN / Hide Remote**, on both the map and the
   Connections table, in the "…" menu on each. They compose, so any slice
   works — hiding remote leaves just this machine and the network around it.
   Localhost starts hidden: traffic that never leaves the machine is rarely
   what you opened this to see. Listening sockets are never hidden by these,
   so "what am I exposing" stays answerable.
+- **Direction column** in the Connections table: which end opened the
+  connection, not which way the bytes went. It reads the rule the map's
+  arrowheads use — landing on a port you're listening on, or which end holds
+  the ephemeral port — and says Unclear rather than guessing when neither
+  applies. Listening sockets show a dash: nobody has dialled anything yet.
 - **Drag columns into the order you want**, in both the process tables and the
   Connections table. The order persists with the widths and the visible set.
   Process categories share one order — a column means the same thing on every
@@ -65,8 +71,13 @@ auto-update prompt.
 - **The window opens on the process list, not the graphs.** The tab you act on
   is the one you land on; the graphs moved to the end of the row and are named
   **Visualizations**. Clicking the dock icon now just shows the window on
-  whatever tab you left it on, rather than forcing the graphs to the front —
-  the dock menu's Visualizations entry (⌘1) still goes straight there.
+  whatever tab you left it on, rather than forcing the graphs to the front.
+- **A shortcut per tab, in tab order**: ⌘1 CPU through ⌘7 Visualizations, the
+  way Activity Monitor numbers its own. ⌘1 and ⌘2 previously meant the graphs
+  and the process list, from when those were the first two tabs.
+- **Roomier footers.** The summary panes were 52pt in a 66pt strip, which left
+  the graphs a few pixels of amplitude and the rows no air between them; they
+  now follow Activity Monitor's proportions — 84pt panes in a 104pt strip.
 
 ## [0.3.1] - 2026-08-12
 
@@ -286,7 +297,8 @@ auto-update prompt.
 - Keyboard shortcuts (⌘0 chart, ⌘, preferences, ⌘W close, ⌘H hide, ⌘Q quit).
 - CI build workflow and a tag-driven release workflow.
 
-[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/acheris-labs/tracker/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/acheris-labs/tracker/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/acheris-labs/tracker/compare/v0.2.8...v0.3.0
 [0.2.8]: https://github.com/acheris-labs/tracker/compare/v0.2.7...v0.2.8
