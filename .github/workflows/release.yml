@@ -101,6 +101,17 @@ jobs:
             --team-id    "$APPLE_TEAM_ID" \
             --password   "$APPLE_APP_PASSWORD"
 
+      # --- Bundled data ----------------------------------------------------
+      # Rebuild the IP->country table from the registries so a release ships
+      # current delegations rather than whatever was committed. `make geodata`
+      # exits non-zero if any registry is unreachable or returns a short file,
+      # which fails the release: shipping a silently stale table would look
+      # exactly like a working one.
+      - name: Refresh IP-to-country table
+        run: |
+          set -euo pipefail
+          make geodata
+
       # --- Build / sign / notarize / DMG -----------------------------------
       # Version flows through `make` so the Makefile's own xcodebuild (the build
       # that actually ends up in the DMG) stamps it. A separate xcodebuild step

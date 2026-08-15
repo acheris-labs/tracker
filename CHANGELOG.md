@@ -9,7 +9,75 @@ GitHub release body and as the link target for Sparkle's release notes, so
 write each entry as if it were the changelog the user reads in the
 auto-update prompt.
 
-## [Unreleased]
+## [0.4.0] - 2026-08-13
+
+### Added
+- **Connection Map.** "…" › Connection Map on the Connections tab — or
+  Connection Map… in the dock icon's right-click menu, which opens it on its
+  own without dragging the main window along — shows a
+  radial view: this Mac at the centre, every host it's talking to around it,
+  and edges weighted by how much data crossed them (logarithmically, so a
+  600 MB upload and a 4 KB poll can share one picture). Edge colour is the
+  send/receive ratio on a continuous blue-violet-red scale rather than a
+  category, so an even split reads as even instead of flipping at 50%. The
+  arrowhead points the way the
+  connection was opened — worked out from which end holds the ephemeral port,
+  or which end's port we're listening on. Public hosts carry their country
+  flag; LAN and loopback peers show a house instead, since they have no
+  registry country.
+- **Map interaction.** Hovering a node names the processes behind it, with
+  their icons and pids, the connection count, byte totals and which side
+  opened it — and the map holds still while the pointer is over it. Clicking
+  opens that process's inspector; when several processes share a host, it
+  offers a pick list. Nodes glide to their places rather than jumping, hold
+  still while you're reading one, and a toolbar Pause holds the whole picture
+  for as long as you like. Outgoing / Incoming / Unclear filter by which side
+  dialled, independently — "unclear" is a real state (UDP has no handshake to
+  read, and a host can be dialled both ways), so it gets its own switch rather
+  than being folded into one of the others.
+- **Country column** in the Connections table, sortable, showing the flag and
+  code for public addresses and a house for anything on this network
+  (RFC1918, loopback, and their IPv6 equivalents). It uses the same source as
+  the map, so "Show Countries" governs both.
+  Countries come from a table bundled with the app, compiled from the five
+  regional registries' published delegation statistics and refreshed on every
+  release: flags appear the instant a row does, and nothing about your
+  connections goes anywhere. It is the registry's country rather than
+  geolocation, so an anycast address reads as its owner's home country
+  instead of the datacentre you actually reached.
+- **A footer on the Connections tab**, matching the process tabs: how many
+  connections each side opened (outgoing, incoming, and the unclear ones), the
+  same split graphed over time, and what the sockets are — TCP, UDP, and how
+  many are listening. It counts what the table is showing — the Hide
+  Localhost/LAN/Remote scope applies — but not the search field, so a summary
+  doesn't shift under you as you type a filter.
+- **Hide Localhost / Hide LAN / Hide Remote**, on both the map and the
+  Connections table, in the "…" menu on each. They compose, so any slice
+  works — hiding remote leaves just this machine and the network around it.
+  Localhost starts hidden: traffic that never leaves the machine is rarely
+  what you opened this to see. Listening sockets are never hidden by these,
+  so "what am I exposing" stays answerable.
+- **Direction column** in the Connections table: which end opened the
+  connection, not which way the bytes went. It reads the rule the map's
+  arrowheads use — landing on a port you're listening on, or which end holds
+  the ephemeral port — and says Unclear rather than guessing when neither
+  applies. Listening sockets show a dash: nobody has dialled anything yet.
+- **Drag columns into the order you want**, in both the process tables and the
+  Connections table. The order persists with the widths and the visible set.
+  Process categories share one order — a column means the same thing on every
+  tab — while the Connections table and the inspector's keep their own.
+
+### Changed
+- **The window opens on the process list, not the graphs.** The tab you act on
+  is the one you land on; the graphs moved to the end of the row and are named
+  **Visualizations**. Clicking the dock icon now just shows the window on
+  whatever tab you left it on, rather than forcing the graphs to the front.
+- **A shortcut per tab, in tab order**: ⌘1 CPU through ⌘7 Visualizations, the
+  way Activity Monitor numbers its own. ⌘1 and ⌘2 previously meant the graphs
+  and the process list, from when those were the first two tabs.
+- **Roomier footers.** The summary panes were 52pt in a 66pt strip, which left
+  the graphs a few pixels of amplitude and the rows no air between them; they
+  now follow Activity Monitor's proportions — 84pt panes in a 104pt strip.
 
 ## [0.3.1] - 2026-08-12
 
@@ -49,7 +117,12 @@ auto-update prompt.
   treatment. The dock icon keeps following System Settings rather than the
   app's override, since it's drawn on the Dock's own material.
 
+### Changed
+- The dock menu drops "Open Activity Monitor".
+
 ### Fixed
+- The connection map stopped refreshing if the main window was closed while it
+  was open — it kept drawing a stale sample with no sign it had stopped.
 - **Other users' processes now show their real name and icon** in the process
   tabs. Their name came from the kernel's 16-character `p_comm` field with no
   executable path, so long names were cut ("AddressBookSourceSy…") and every
@@ -224,7 +297,8 @@ auto-update prompt.
 - Keyboard shortcuts (⌘0 chart, ⌘, preferences, ⌘W close, ⌘H hide, ⌘Q quit).
 - CI build workflow and a tag-driven release workflow.
 
-[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/acheris-labs/tracker/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/acheris-labs/tracker/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/acheris-labs/tracker/compare/v0.2.8...v0.3.0
 [0.2.8]: https://github.com/acheris-labs/tracker/compare/v0.2.7...v0.2.8

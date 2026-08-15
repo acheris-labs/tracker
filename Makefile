@@ -31,7 +31,7 @@ else
   HARDENED := --options runtime --timestamp
 endif
 
-.PHONY: build debug run kill rerun clean load history-30 history-180 show-defaults app-path icon sign notarize dmg setup-notary setup-secrets
+.PHONY: build debug run kill rerun clean load history-30 history-180 show-defaults app-path icon geodata sign notarize dmg setup-notary setup-secrets
 
 # --- Credential bootstrap ---------------------------------------------------
 # Reusable shell snippet that reads the Developer ID identity + Team ID from
@@ -126,6 +126,15 @@ badge-threshold-%:
 
 show-defaults:
 	-defaults read $(BUNDLE_ID) 2>/dev/null || echo "(no defaults set)"
+
+# Rebuild the bundled IP→country table from the five regional registries'
+# published delegation statistics. Committed to the repo so a plain `make
+# build` needs no network and any clone produces the same binary; refreshed on
+# every release by the release workflow, which fails if a registry is
+# unreachable rather than quietly shipping last release's table.
+geodata:
+	python3 tools/gen-geoip.py Tracker/geoip.dat
+	@git diff --stat -- Tracker/geoip.dat || true
 
 icon:
 	swift tools/gen-icon.swift Tracker.iconset

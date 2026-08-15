@@ -357,6 +357,7 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     let chartView: ChartView
     let processList = ProcessListView()
     let connectionList = ConnectionListView(showProcess: true, defaultsKey: "all")
+    private var connectionMap: ConnectionMapWindowController?
 
     /// What the segmented control's index means. The process categories keep
     /// their own enum; this one is about window chrome.
@@ -367,9 +368,9 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
         init(index: Int) {
             switch index {
-            case 0: self = .chart
+            case ChartIndex.value: self = .chart
             case ConnectionsIndex.value: self = .connections
-            default: self = ProcessListView.Tab(rawValue: index - 1).map(Pane.process) ?? .chart
+            default: self = ProcessListView.Tab(rawValue: index).map(Pane.process) ?? .chart
             }
         }
 
@@ -381,13 +382,22 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         var hasProcessActions: Bool { self != .chart }
     }
 
-    /// Last segment; kept in one place so the index arithmetic has a name.
-    enum ConnectionsIndex { static let value = 6 }
+    /// The two segments that aren't process categories; kept in one place so
+    /// the index arithmetic has a name. Process categories occupy 0…4, in
+    /// ProcessListView.Tab's own order.
+    enum ConnectionsIndex { static let value = 5 }
+    enum ChartIndex { static let value = 6 }
 
     private(set) var pane: Pane = .chart
     private let tabs = RightClickableTabView()
+    // The lists lead and the chart trails: the tabs you act on are the ones
+    // you reach for, and Chart is where you land by default anyway.
+    /// Segment order, which is also ⌘1…⌘7 order — the app menu builds its
+    /// shortcuts from this list so the two can't drift apart.
+    static let tabTitles = ["CPU", "Memory", "Energy", "Disk", "Network",
+                            "Connections", "Visualizations"]
     private let selector = NSSegmentedControl(
-        labels: ["Chart", "CPU", "Memory", "Energy", "Disk", "Network", "Connections"],
+        labels: ChartWindowController.tabTitles,
         trackingMode: .selectOne, target: nil, action: nil)
     private weak var renderer: HistoryRenderer?
     private let hasBattery: Bool
@@ -460,7 +470,9 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
 
     /// ⌘F from the main menu — focuses the toolbar search on process tabs.
     @objc func focusSearch(_ sender: Any?) {
-        guard selector.selectedSegment > 0 else { NSSound.beep(); return }
+        guard Pane(index: selector.selectedSegment).hasSearch else {
+            NSSound.beep(); return
+        }
         searchItem?.beginSearchInteraction()
     }
 
@@ -692,7 +704,10 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
             tabs.trailingAnchor.constraint(equalTo: root.trailingAnchor),
         ])
         window.contentView = root
-        applySelection(0)
+        // Open on the process list, not the graphs: it's the tab you act on.
+        // Which category is ProcessListView's business — it restores the one
+        // you left it on, and defaults to CPU.
+        applySelection(processList.currentTab.rawValue)
 
         applyCurrentColors()
         updateRightAxis()
@@ -898,12 +913,41 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         menu.addItem(hist)
 
         if pane == .connections {
+            let map = NSMenuItem(title: "Connection Map…",
+                                 action: #selector(showConnectionMap(_:)),
+                                 keyEquivalent: "")
+            map.target = self
+            menu.addItem(map)
+
             let resolve = NSMenuItem(title: "Resolve Host Names",
                                      action: #selector(toggleHostNameResolution(_:)),
                                      keyEquivalent: "")
             resolve.target = self
             resolve.state = ConnectionListView.resolvesHostNames ? .on : .off
             menu.addItem(resolve)
+
+            for (title, on, tag) in [
+                ("Hide Localhost", ConnectionListView.hidesLoopback, 0),
+                ("Hide LAN", ConnectionListView.hidesLAN, 1),
+                ("Hide Remote", ConnectionListView.hidesRemote, 2),
+            ] {
+                let item = NSMenuItem(title: title,
+                                      action: #selector(toggleTrafficScope(_:)),
+                                      keyEquivalent: "")
+                item.target = self
+                item.state = on ? .on : .off
+                item.tag = tag
+                menu.addItem(item)
+            }
+
+            let geo = NSMenuItem(title: "Show Countries",
+                                 action: #selector(toggleCountryLookup(_:)),
+                                 keyEquivalent: "")
+            geo.target = self
+            geo.state = GeoDatabase.isEnabled ? .on : .off
+            geo.toolTip = "Which registry holds each address, from a table "
+                + "bundled with the app. Nothing is looked up over the network."
+            menu.addItem(geo)
         }
 
         let cols = NSMenuItem(title: "Columns", action: nil, keyEquivalent: "")
@@ -932,19 +976,20 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
         guard let raw = sender.representedObject as? Int,
               let scope = ProcessListView.Scope(rawValue: raw) else { return }
         processList.applyScope(scope)
-        if selector.selectedSegment > 0 { window?.subtitle = scope.label }
+        if Pane(index: selector.selectedSegment).isProcess {
+            window?.subtitle = scope.label
+        }
     }
 
-    // Menu-driven selection (⌘1 / ⌘2 from the app's Window menu).
-    @objc func selectChartTab(_ sender: Any?)     { applySelection(0) }   // Chart
-    @objc func selectProcessesTab(_ sender: Any?) { applySelection(1) }   // CPU category
-    @objc func selectConnectionsTab(_ sender: Any?) { applySelection(ConnectionsIndex.value) }
+    /// Select by segment index — what the ⌘1…⌘7 menu items drive, so the
+    /// shortcuts and the tab strip can't drift apart.
+    func selectTab(index: Int) { applySelection(index) }
 
     @objc private func selectorChanged(_ s: NSSegmentedControl) {
         applySelection(s.selectedSegment)
     }
 
-    /// 0 = Chart; 1…5 = process categories; 6 = Connections.
+    /// 0…4 = process categories; 5 = Connections; 6 = Chart.
     private func applySelection(_ index: Int) {
         let i = max(0, index)
         selector.selectedSegment = i
@@ -979,10 +1024,48 @@ final class ChartWindowController: NSWindowController, NSWindowDelegate,
     /// so the netstat column's 16-character truncation doesn't show.
     func setConnections(_ rows: [Connection], processNames: [pid_t: ProcessOwner]) {
         connectionList.setConnections(rows, processNames: processNames)
+        connectionMap?.setConnections(rows, processNames: processNames)
+    }
+
+    /// Whether anything on screen needs fresh process/connection samples —
+    /// the main window, or the map on its own.
+    var needsLiveSamples: Bool {
+        (window?.isVisible ?? false) || connectionMap?.window?.isVisible == true
     }
 
     var isConnectionsPaneVisible: Bool {
-        pane == .connections && (window?.isVisible ?? false)
+        if connectionMap?.window?.isVisible == true { return true }
+        return pane == .connections && (window?.isVisible ?? false)
+    }
+
+    @objc func showConnectionMap(_ sender: Any?) {
+        if connectionMap == nil {
+            let controller = ConnectionMapWindowController()
+            controller.onClose = { [weak self] in self?.connectionMap = nil }
+            controller.onScopeChange = { [weak self] in
+                self?.connectionList.hostNameDisplayChanged()
+            }
+            controller.onInspect = { [weak self] pid in
+                self?.processList.openInspector(pid: pid)
+            }
+            connectionMap = controller
+        }
+        connectionMap?.showWindow(nil)
+        connectionMap?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func toggleCountryLookup(_ sender: NSMenuItem) {
+        GeoDatabase.isEnabled.toggle()
+    }
+
+    @objc private func toggleTrafficScope(_ sender: NSMenuItem) {
+        switch sender.tag {
+        case 0:  ConnectionListView.hidesLoopback.toggle()
+        case 1:  ConnectionListView.hidesLAN.toggle()
+        default: ConnectionListView.hidesRemote.toggle()
+        }
+        connectionList.hostNameDisplayChanged()   // re-filters and redraws
+        connectionMap?.rebuild(immediate: true)
     }
 
     private static func axisLabel(_ s: String, alignment: NSTextAlignment) -> NSTextField {

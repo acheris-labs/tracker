@@ -6,7 +6,7 @@ import AppKit
 /// One bordered, rounded footer pane. `height` nil hugs the content (used by
 /// the Chart tab's legend panes, whose row counts differ).
 final class FooterPane: NSView {
-    init(content: NSView, minWidth: CGFloat = 190,
+    init(content: NSView, minWidth: CGFloat = 200,
          height: CGFloat? = Theme.footerPaneHeight) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -17,8 +17,8 @@ final class FooterPane: NSView {
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
         var constraints = [
-            content.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
             content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth),
@@ -89,7 +89,9 @@ final class FooterStatGrid: NSView {
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .width
-        stack.spacing = 2
+        // Enough air that the rows use the pane rather than huddling in the
+        // middle of it — the boxes follow Activity Monitor's proportions now.
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         var constraints = [
@@ -147,7 +149,7 @@ final class FooterGraphView: NSView {
         NSLayoutConstraint.activate([
             captionLabel.topAnchor.constraint(equalTo: topAnchor),
             captionLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 170),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
         ])
     }
 
@@ -230,5 +232,54 @@ final class FooterGraphView: NSView {
         edge.lineWidth = 1
         color.setStroke()
         edge.stroke()
+    }
+}
+
+/// The strip along the bottom of a table: a hairline, then boxed panes
+/// centered under it. Shared by the process tabs and the Connections tab so
+/// the two footers are the same object rather than the same idea twice.
+///
+/// Deliberately transparent — the window background shows through, so it
+/// tracks the system appearance. A fixed cgColor would freeze light/dark.
+final class FooterBar: NSView {
+    private let stack = NSStackView()
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let sep = NSBox()
+        sep.boxType = .separator
+        sep.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(sep)
+
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            sep.topAnchor.constraint(equalTo: topAnchor),
+            sep.leadingAnchor.constraint(equalTo: leadingAnchor),
+            sep.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            heightAnchor.constraint(equalToConstant: Theme.footerHeight),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not implemented") }
+
+    /// Replace the panes. Each content view is boxed in a FooterPane first.
+    func setPanes(_ contents: [NSView]) {
+        for old in stack.arrangedSubviews {
+            stack.removeArrangedSubview(old)
+            old.removeFromSuperview()
+        }
+        for c in contents { stack.addArrangedSubview(FooterPane(content: c)) }
     }
 }

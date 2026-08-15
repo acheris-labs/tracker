@@ -109,26 +109,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication,
                                        hasVisibleWindows flag: Bool) -> Bool {
-        // If a window is already up, let AppKit bring it forward.
-        // Otherwise open the chart window.
-        if !flag { showChartWindow(nil) }
+        // If a window is already up, let AppKit bring it forward. Otherwise
+        // open the main window on whichever tab it opens on — clicking the
+        // dock icon is "show me the app", not "show me the graphs".
+        if !flag { ensureChartWindow() }
         return true
     }
 
-    @objc func showChartWindow(_ sender: Any?) {
+    /// Straight to the map from the dock menu. The chart window owns it, so
+    /// that has to exist — but it stays where it was rather than being shoved
+    /// in front of whatever you were doing.
+    @objc func showConnectionMapFromDock(_ sender: Any?) {
+        let hadWindow = chart?.window?.isVisible ?? false
         ensureChartWindow()
-        chart?.selectChartTab(nil)
-    }
-
-    @objc func showProcessesTab(_ sender: Any?) {
-        ensureChartWindow()
-        chart?.selectProcessesTab(nil)
-    }
-
-    @objc func showConnectionsTab(_ sender: Any?) {
-        ensureChartWindow()
-        chart?.selectConnectionsTab(nil)
+        if !hadWindow { chart?.window?.orderOut(nil) }
+        NSApp.activate()
+        chart?.showConnectionMap(nil)
         pushConnections()
+    }
+
+    /// ⌘1…⌘7 — the menu item's tag is the segment index.
+    @objc func showTab(_ sender: NSMenuItem) {
+        ensureChartWindow()
+        chart?.selectTab(index: sender.tag)
+        // The Connections tab is the one that needs data pushed at it; the
+        // sampler is gated on that tab being on screen.
+        if sender.tag == ChartWindowController.ConnectionsIndex.value {
+            pushConnections()
+        }
     }
 
     private func ensureChartWindow() {
@@ -180,12 +188,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         processIntervalSeconds = clamped
         processTickCount = 0
         UserDefaults.standard.set(clamped, forKey: "ProcessRefreshSeconds")
-    }
-
-    @objc func openActivityMonitor(_ sender: Any?) {
-        let url = URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")
-        NSWorkspace.shared.openApplication(at: url,
-                                           configuration: NSWorkspace.OpenConfiguration())
     }
 
     /// Standard macOS About panel, styled to match Newt: name, version, and
@@ -292,11 +294,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         prefsItem.target = self
         menu.addItem(prefsItem)
 
-        let amItem = NSMenuItem(title: "Open Activity Monitor",
-                                action: #selector(openActivityMonitor(_:)),
-                                keyEquivalent: "")
-        amItem.target = self
-        menu.addItem(amItem)
+        let mapItem = NSMenuItem(title: "Connection Map…",
+                                 action: #selector(showConnectionMapFromDock(_:)),
+                                 keyEquivalent: "")
+        mapItem.target = self
+        menu.addItem(mapItem)
 
         return menu
     }
@@ -520,9 +522,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                        netRx: netTotals.rxPerSec, netTx: netTotals.txPerSec,
                        swapUsed: swap.used)
 
-        // Only pay the per-process sampling cost when someone is looking,
-        // and only at the user-chosen interval (default 2s).
-        if let win = chart?.window, win.isVisible {
+        // Only pay the per-process sampling cost when someone is looking, and
+        // only at the user-chosen interval (default 2s). "Looking" includes the
+        // connection map on its own — it outlives the main window, and a map
+        // quietly showing a stale sample is worse than showing none.
+        if chart?.needsLiveSamples == true {
             pushSystemStats()
             processTickCount += 1
             if processTickCount >= processIntervalSeconds {
@@ -606,27 +610,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         autoItem.state = updaterController.updater.automaticallyChecksForUpdates ? .on : .off
         appMenu.addItem(autoItem)
         appMenu.addItem(.separator())
-        let chartItem = NSMenuItem(
-            title: "Chart",
-            action: #selector(showChartWindow(_:)),
-            keyEquivalent: "1"
-        )
-        chartItem.target = self
-        appMenu.addItem(chartItem)
-        let procItem = NSMenuItem(
-            title: "Processes",
-            action: #selector(showProcessesTab(_:)),
-            keyEquivalent: "2"
-        )
-        procItem.target = self
-        appMenu.addItem(procItem)
-        let connItem = NSMenuItem(
-            title: "Connections",
-            action: #selector(showConnectionsTab(_:)),
-            keyEquivalent: "3"
-        )
-        connItem.target = self
-        appMenu.addItem(connItem)
+        // One shortcut per tab, in tab order, so ⌘N and the tab strip agree.
+        // Activity Monitor numbers its tabs the same way.
+        for (i, title) in ChartWindowController.tabTitles.enumerated() {
+            let item = NSMenuItem(title: title, action: #selector(showTab(_:)),
+                                  keyEquivalent: "\(i + 1)")
+            item.target = self
+            item.tag = i
+            appMenu.addItem(item)
+        }
         let findItem = NSMenuItem(
             title: "Filter Processes…",
             action: #selector(ChartWindowController.focusSearch(_:)),

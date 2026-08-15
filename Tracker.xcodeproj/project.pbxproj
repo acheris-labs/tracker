@@ -17,6 +17,7 @@
 		AA0000000000000000000026 /* DiskSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000025 /* DiskSampler.swift */; };
 		AA0000000000000000000028 /* MemorySampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000027 /* MemorySampler.swift */; };
 		AA000000000000000000002A /* Tracker.icns in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000029 /* Tracker.icns */; };
+		AA0000000000000000000054 /* geoip.dat in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000053 /* geoip.dat */; };
 		AA000000000000000000002D /* ChartWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002C /* ChartWindow.swift */; };
 		AA000000000000000000002F /* ProcessSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002E /* ProcessSampler.swift */; };
 		AA0000000000000000000031 /* ProcessListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000030 /* ProcessListView.swift */; };
@@ -26,6 +27,11 @@
 		AA000000000000000000003C /* InspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003B /* InspectorPanel.swift */; };
 		AA000000000000000000003E /* Appearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003D /* Appearance.swift */; };
 		AA000000000000000000004A /* SystemConnectionSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000049 /* SystemConnectionSampler.swift */; };
+		AA000000000000000000004C /* ConnectionGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004B /* ConnectionGraph.swift */; };
+		AA000000000000000000004E /* GeoDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004D /* GeoDatabase.swift */; };
+		AA0000000000000000000050 /* ConnectionMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004F /* ConnectionMapView.swift */; };
+		AA0000000000000000000052 /* ConnectionMapWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000051 /* ConnectionMapWindow.swift */; };
+		AA0000000000000000000056 /* TableColumnOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000055 /* TableColumnOrder.swift */; };
 		AA0000000000000000000040 /* ConnectionSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000041 /* ConnectionSampler.swift */; };
 		AA0000000000000000000042 /* HostResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000043 /* HostResolver.swift */; };
 		AA0000000000000000000044 /* ConnectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000045 /* ConnectionListView.swift */; };
@@ -46,6 +52,7 @@
 		AA0000000000000000000025 /* DiskSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskSampler.swift; sourceTree = "<group>"; };
 		AA0000000000000000000027 /* MemorySampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySampler.swift; sourceTree = "<group>"; };
 		AA0000000000000000000029 /* Tracker.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Tracker.icns; sourceTree = "<group>"; };
+		AA0000000000000000000053 /* geoip.dat */ = {isa = PBXFileReference; lastKnownFileType = file; path = geoip.dat; sourceTree = "<group>"; };
 		AA000000000000000000002C /* ChartWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartWindow.swift; sourceTree = "<group>"; };
 		AA000000000000000000002E /* ProcessSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessSampler.swift; sourceTree = "<group>"; };
 		AA0000000000000000000030 /* ProcessListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessListView.swift; sourceTree = "<group>"; };
@@ -55,6 +62,11 @@
 		AA000000000000000000003B /* InspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorPanel.swift; sourceTree = "<group>"; };
 		AA000000000000000000003D /* Appearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Appearance.swift; sourceTree = "<group>"; };
 		AA0000000000000000000049 /* SystemConnectionSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemConnectionSampler.swift; sourceTree = "<group>"; };
+		AA000000000000000000004B /* ConnectionGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionGraph.swift; sourceTree = "<group>"; };
+		AA000000000000000000004D /* GeoDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoDatabase.swift; sourceTree = "<group>"; };
+		AA000000000000000000004F /* ConnectionMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMapView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000051 /* ConnectionMapWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMapWindow.swift; sourceTree = "<group>"; };
+		AA0000000000000000000055 /* TableColumnOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TableColumnOrder.swift; sourceTree = "<group>"; };
 		AA0000000000000000000041 /* ConnectionSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSampler.swift; sourceTree = "<group>"; };
 		AA0000000000000000000043 /* HostResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostResolver.swift; sourceTree = "<group>"; };
 		AA0000000000000000000045 /* ConnectionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionListView.swift; sourceTree = "<group>"; };
@@ -82,6 +94,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA000000000000000000002A /* Tracker.icns in Resources */,
+				AA0000000000000000000054 /* geoip.dat in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -126,10 +139,16 @@
 				AA000000000000000000003B /* InspectorPanel.swift */,
 				AA000000000000000000003D /* Appearance.swift */,
 				AA0000000000000000000049 /* SystemConnectionSampler.swift */,
+				AA000000000000000000004B /* ConnectionGraph.swift */,
+				AA000000000000000000004D /* GeoDatabase.swift */,
+				AA000000000000000000004F /* ConnectionMapView.swift */,
+				AA0000000000000000000051 /* ConnectionMapWindow.swift */,
+				AA0000000000000000000055 /* TableColumnOrder.swift */,
 				AA0000000000000000000041 /* ConnectionSampler.swift */,
 				AA0000000000000000000043 /* HostResolver.swift */,
 				AA0000000000000000000045 /* ConnectionListView.swift */,
 				AA0000000000000000000029 /* Tracker.icns */,
+				AA0000000000000000000053 /* geoip.dat */,
 				AA0000000000000000000019 /* Info.plist */,
 			);
 			path = Tracker;
@@ -226,6 +245,11 @@
 				AA000000000000000000003C /* InspectorPanel.swift in Sources */,
 				AA000000000000000000003E /* Appearance.swift in Sources */,
 				AA000000000000000000004A /* SystemConnectionSampler.swift in Sources */,
+				AA000000000000000000004C /* ConnectionGraph.swift in Sources */,
+				AA000000000000000000004E /* GeoDatabase.swift in Sources */,
+				AA0000000000000000000050 /* ConnectionMapView.swift in Sources */,
+				AA0000000000000000000052 /* ConnectionMapWindow.swift in Sources */,
+				AA0000000000000000000056 /* TableColumnOrder.swift in Sources */,
 				AA0000000000000000000040 /* ConnectionSampler.swift in Sources */,
 				AA0000000000000000000042 /* HostResolver.swift in Sources */,
 				AA0000000000000000000044 /* ConnectionListView.swift in Sources */,

@@ -21,6 +21,11 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private static func columnWidthsKey(for tab: Tab) -> String {
         "ProcessColumnWidths.\(tab.rawValue)"
     }
+    /// Not per-tab, unlike widths and visibility: every category shares one
+    /// table, so there is only one column order to have. Dragging PID left on
+    /// the CPU tab moves it on the Memory tab too, which is what you'd expect
+    /// from a column that means the same thing everywhere.
+    private static let columnOrderKey = "ProcessColumnOrder"
 
     /// Called when the user changes the refresh interval (seconds).
     var onIntervalChange: ((Int) -> Void)?
@@ -110,11 +115,12 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         applyFilterAndSort()
     }
 
-    private var currentTab: Tab = .cpu
+    /// The category on screen. Restored from defaults at init, so the window
+    /// asks for it rather than assuming CPU when it picks its opening tab.
+    private(set) var currentTab: Tab = .cpu
     private var systemStats = SystemStats()
 
-    private let footer = NSView()
-    private let footerStack = NSStackView()
+    private let footer = FooterBar()
     /// Per-tick footer refresh, rebuilt on tab change to capture that tab's
     /// pane views (Activity-Monitor-style boxed grids/graphs).
     private var footerUpdate: (() -> Void)?
@@ -148,6 +154,8 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         buildTable()
         buildLayout()
         buildRowMenu()
+        TableColumnOrder.apply(
+            UserDefaults.standard.stringArray(forKey: Self.columnOrderKey), to: table)
 
         let saved = Tab(rawValue: UserDefaults.standard.integer(forKey: Self.tabKey)) ?? .cpu
         selectTab(saved)
@@ -288,11 +296,6 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     /// Rebuild the three Activity-Monitor-style footer panes for `tab`, and
     /// install a per-tick update closure that only writes values into them.
     private func rebuildFooterPanes(for tab: Tab) {
-        footerStack.arrangedSubviews.forEach {
-            footerStack.removeArrangedSubview($0)
-            $0.removeFromSuperview()
-        }
-
         let threadsGrid = FooterStatGrid(rows: [.init(label: "Threads:", color: nil),
                                                 .init(label: "Processes:", color: nil)])
 
@@ -418,7 +421,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
 
     private func addPanes(_ contents: [NSView]) {
-        for c in contents { footerStack.addArrangedSubview(FooterPane(content: c)) }
+        footer.setPanes(contents)
     }
 
     private func updateThreadsGrid(_ grid: FooterStatGrid) {
@@ -456,7 +459,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         table.style = .inset
         table.usesAlternatingRowBackgroundColors = true
         table.allowsColumnResizing = true
-        table.allowsColumnReordering = false
+        table.allowsColumnReordering = true
         table.allowsMultipleSelection = false
         table.allowsEmptySelection = true
         table.rowHeight = Theme.processRowHeight
@@ -592,7 +595,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         scroll.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scroll)
 
-        buildFooter()
+        addSubview(footer)
 
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: topAnchor),
@@ -603,38 +606,6 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
             footer.leadingAnchor.constraint(equalTo: leadingAnchor),
             footer.trailingAnchor.constraint(equalTo: trailingAnchor),
             footer.bottomAnchor.constraint(equalTo: bottomAnchor),
-            footer.heightAnchor.constraint(equalToConstant: Theme.footerHeight),
-        ])
-    }
-
-    /// Activity-Monitor-style footer: three boxed panes centered below a
-    /// hairline. Pane contents are per-tab (see rebuildFooterPanes).
-    private func buildFooter() {
-        // Transparent — the window background shows through, tracking the
-        // system appearance (a fixed cgColor would freeze light/dark mode).
-        footer.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(footer)
-
-        let sep = NSBox()
-        sep.boxType = .separator
-        sep.translatesAutoresizingMaskIntoConstraints = false
-        footer.addSubview(sep)
-
-        footerStack.orientation = .horizontal
-        footerStack.alignment = .centerY
-        footerStack.spacing = 12
-        footerStack.translatesAutoresizingMaskIntoConstraints = false
-        footer.addSubview(footerStack)
-
-        NSLayoutConstraint.activate([
-            sep.topAnchor.constraint(equalTo: footer.topAnchor),
-            sep.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
-            sep.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
-
-            footerStack.centerXAnchor.constraint(equalTo: footer.centerXAnchor),
-            footerStack.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
-            footerStack.leadingAnchor.constraint(greaterThanOrEqualTo: footer.leadingAnchor, constant: 12),
-            footerStack.trailingAnchor.constraint(lessThanOrEqualTo: footer.trailingAnchor, constant: -12),
         ])
     }
 
@@ -844,6 +815,10 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     /// User dragged a column divider. Name: remember it and stop auto-fill.
     /// Others: persist the width for this tab and re-fill Name around it.
+    func tableView(_ tableView: NSTableView, didDrag tableColumn: NSTableColumn) {
+        UserDefaults.standard.set(TableColumnOrder.of(table), forKey: Self.columnOrderKey)
+    }
+
     func tableViewColumnDidResize(_ notification: Notification) {
         guard !isFittingColumns,
               let col = notification.userInfo?["NSTableColumn"] as? NSTableColumn else { return }
