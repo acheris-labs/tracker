@@ -9,6 +9,23 @@ GitHub release body and as the link target for Sparkle's release notes, so
 write each entry as if it were the changelog the user reads in the
 auto-update prompt.
 
+## [0.4.1] - 2026-08-15
+
+### Added
+- **The Memory tab's footer now reports what Activity Monitor's does**:
+  Physical Memory, Memory Used, Cached Files and Swap Used beside App Memory,
+  Wired Memory and Compressed, with a memory-pressure graph that takes its
+  green/yellow/red straight from the kernel's own pressure level rather than a
+  threshold we invented. App Memory, Wired, Compressed and Cached Files each
+  match Activity Monitor's figure to the hundredth of a GB, verified against a
+  simultaneous sample.
+
+  Memory Used is App + Wired + Compressed — Apple's documented definition, and
+  the sum of the three parts shown next to it. Activity Monitor's own headline
+  runs about 0.5–1.5 GB higher than that, but its displayed parts don't add up
+  to its own total either, so the difference lives in that headline rather than
+  in the components.
+
 ## [0.4.0] - 2026-08-13
 
 ### Added
@@ -297,7 +314,8 @@ auto-update prompt.
 - Keyboard shortcuts (⌘0 chart, ⌘, preferences, ⌘W close, ⌘H hide, ⌘Q quit).
 - CI build workflow and a tag-driven release workflow.
 
-[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/acheris-labs/tracker/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/acheris-labs/tracker/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/acheris-labs/tracker/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/acheris-labs/tracker/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/acheris-labs/tracker/compare/v0.2.8...v0.3.0

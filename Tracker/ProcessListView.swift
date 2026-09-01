@@ -91,6 +91,8 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         var netRxPerSec = 0.0
         var netTxPerSec = 0.0
         var swapUsedBytes = 0.0
+        /// The Memory tab's footer breakdown, in Activity Monitor's categories.
+        var memory = MemoryBreakdown()
     }
 
     /// AM's View-menu scopes, driven from the toolbar's "…" menu.
@@ -129,6 +131,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private struct FooterSample {
         var sys = 0.0, user = 0.0     // 0…1
         var mem = 0.0                 // 0…1
+        var pressure = 0.0            // 0…1, drives the memory pressure graph
         var read = 0.0, write = 0.0   // bytes/sec
         var power = 0.0               // total W across processes
         var batt = 0.0                // 0…1
@@ -285,6 +288,7 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         history.append(FooterSample(
             sys: s.cpuSysPct / 100, user: s.cpuUserPct / 100,
             mem: s.memoryUsedPct / 100,
+            pressure: s.memory.pressure,
             read: s.diskReadPerSec, write: s.diskWritePerSec,
             power: allRows.reduce(0.0) { $0 + $1.powerWatts },
             batt: s.batteryPercent,
@@ -320,23 +324,45 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
                 self.updateThreadsGrid(threadsGrid)
             }
         case .memory:
-            let graph = FooterGraphView(caption: "Memory Used",
+            // Activity Monitor's three memory panes: the pressure graph, the
+            // whole-machine totals, and what "used" is made of.
+            let graph = FooterGraphView(caption: "Memory Pressure",
                                         colors: [.systemGreen], mode: .stack)
-            let stats = FooterStatGrid(rows: [
+            let totals = FooterStatGrid(rows: [
+                .init(label: "Physical Memory:", color: nil),
                 .init(label: "Memory Used:", color: nil),
-                .init(label: "App RSS Total:", color: nil),
+                .init(label: "Cached Files:", color: nil),
                 .init(label: "Swap Used:", color: nil),
             ])
-            addPanes([graph, stats, threadsGrid])
+            let parts = FooterStatGrid(rows: [
+                .init(label: "App Memory:", color: nil),
+                .init(label: "Wired Memory:", color: nil),
+                .init(label: "Compressed:", color: nil),
+            ])
+            addPanes([graph, totals, parts])
             footerUpdate = { [weak self] in
                 guard let self else { return }
-                stats.setValue(String(format: "%.0f%%", self.systemStats.memoryUsedPct), at: 0)
-                let totalRSS = self.allRows.reduce(0.0) { $0 + $1.rssMB }
-                stats.setValue(Self.formatMB(totalRSS), at: 1)
-                stats.setValue(Self.bytesFormatter.string(
-                    fromByteCount: Int64(self.systemStats.swapUsedBytes)), at: 2)
-                graph.setLayers([self.history.map(\.mem)])
-                self.updateThreadsGrid(threadsGrid)
+                let m = self.systemStats.memory
+                let gb = { (v: Double) in Self.formatGB(v) }
+                totals.setValue(gb(m.total), at: 0)
+                totals.setValue(gb(m.used), at: 1)
+                totals.setValue(gb(m.cachedFiles), at: 2)
+                totals.setValue(m.swapUsed < 1 ? "0 bytes"
+                                : Self.bytesFormatter.string(fromByteCount: Int64(m.swapUsed)),
+                                at: 3)
+                parts.setValue(gb(m.app), at: 0)
+                parts.setValue(gb(m.wired), at: 1)
+                parts.setValue(gb(m.compressed), at: 2)
+                // Green / yellow / red, straight from the kernel's own level
+                // rather than a threshold we invented.
+                let pressureColor: NSColor
+                switch m.pressureLevel {
+                case 4:  pressureColor = .systemRed
+                case 2:  pressureColor = .systemYellow
+                default: pressureColor = .systemGreen
+                }
+                if graph.colors.first != pressureColor { graph.colors = [pressureColor] }
+                graph.setLayers([self.history.map(\.pressure)])
             }
         case .energy:
             let impact = FooterGraphView(caption: "Energy Impact",
@@ -999,6 +1025,13 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         if h > 0 { return String(format: "%d:%02d:%05.2f", h, m, s) }
         if whole >= 60 { return String(format: "%d:%05.2f", m, s) }
         return String(format: "%.2f", total)
+    }
+
+    /// Bytes as GB the way Activity Monitor's memory footer writes them: two
+    /// decimals, and binary units under a decimal label (its "32.00 GB" is
+    /// 32 GiB).
+    static func formatGB(_ bytes: Double) -> String {
+        String(format: "%.2f GB", bytes / 1_073_741_824)
     }
 
     static func formatMB(_ mb: Double) -> String {

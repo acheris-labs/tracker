@@ -91,7 +91,8 @@ final class FooterStatGrid: NSView {
         stack.alignment = .width
         // Enough air that the rows use the pane rather than huddling in the
         // middle of it — the boxes follow Activity Monitor's proportions now.
-        stack.spacing = 6
+        // Four rows only fit the same box if they give that air back.
+        stack.spacing = rows.count > 3 ? 2 : 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         var constraints = [
@@ -127,7 +128,9 @@ final class FooterGraphView: NSView {
 
     private let captionLabel = NSTextField(labelWithString: "")
     private let mode: Mode
-    private let colors: [NSColor]
+    /// Settable: the memory-pressure graph recolours itself as the kernel's
+    /// pressure level changes, the way Activity Monitor's does.
+    var colors: [NSColor] { didSet { needsDisplay = true } }
     private var layers: [[Double]] = []   // each value 0…1
     private let graphInsetTop: CGFloat = 17
 

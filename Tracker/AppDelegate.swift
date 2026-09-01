@@ -578,7 +578,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             batteryCapacityWh: b.capacityWh,
             netRxPerSec: network.totals.rxPerSec,
             netTxPerSec: network.totals.txPerSec,
-            swapUsedBytes: SwapUsage.current().used))
+            swapUsedBytes: SwapUsage.current().used,
+            memory: memory.breakdown()))
     }
 
     private func buildMainMenu() -> NSMenu {
