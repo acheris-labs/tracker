@@ -6,6 +6,15 @@
     <description>Updates for Tracker</description>
     <language>en</language>
     <item>
+      <title>Tracker 0.4.1</title>
+      <pubDate>Tue, 01 Sep 2026 17:35:44 +0000</pubDate>
+      <sparkle:version>1788283986</sparkle:version>
+      <sparkle:shortVersionString>0.4.1</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/acheris-labs/tracker/releases/tag/v0.4.1</sparkle:releaseNotesLink>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/acheris-labs/tracker/releases/download/v0.4.1/Tracker-0.4.1.dmg" sparkle:edSignature="Rt9tgq3t64n02HjnJBRPxte9/7v7ER5I3xQqIb01aQ2N7Ty+I9csCE1ozBKYseSLEP/qFD0wRTKmLlZsEMcgBw==" length="2317403" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Tracker 0.4.0</title>
       <pubDate>Sat, 15 Aug 2026 13:25:59 +0000</pubDate>
       <sparkle:version>1786800218</sparkle:version>
