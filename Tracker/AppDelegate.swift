@@ -466,6 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyColors(_ c: ChartColors) {
         renderer.colors = c
+        chart?.processList.chartColors = c
         c.save()
         NSApp.applicationIconImage = renderer.render()
     }
@@ -555,19 +556,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Feed the process view's footer with system-wide CPU / memory / disk
-    /// numbers. CPUFrame's per-group fractions are weighted by core counts to
-    /// get system-wide user / system percentages.
+    /// numbers. The CPU frame goes over whole, with each group's core share,
+    /// so the footer can stack the same four series the chart tab draws.
     private func pushSystemStats() {
         let cores = Double(cpu.numP + cpu.numE)
-        let user = cores > 0
-            ? (lastCPU.pUser * Double(cpu.numP) + lastCPU.eUser * Double(cpu.numE)) / cores * 100
-            : 0
-        let sys = cores > 0
-            ? (lastCPU.pSys * Double(cpu.numP) + lastCPU.eSys * Double(cpu.numE)) / cores * 100
-            : 0
         let b = lastBatteryInfo
         chart?.processList.setSystemStats(.init(
-            cpuUserPct: user, cpuSysPct: sys,
+            cpu: lastCPU,
+            pCoreShare: cores > 0 ? Double(cpu.numP) / cores : 0,
+            eCoreShare: cores > 0 ? Double(cpu.numE) / cores : 0,
             memoryUsedPct: lastMemory * 100,
             diskReadPerSec: lastDiskRead, diskWritePerSec: lastDiskWrite,
             hasBattery: battery.hasBattery,

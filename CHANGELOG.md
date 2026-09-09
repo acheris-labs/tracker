@@ -9,6 +9,18 @@ GitHub release body and as the link target for Sparkle's release notes, so
 write each entry as if it were the changelog the user reads in the
 auto-update prompt.
 
+## [0.4.2] - 2026-09-09
+
+### Changed
+- **The CPU tab's footer graph now splits load the way the Visualizations tab
+  does**: performance/efficiency crossed with system/user, four stacked bands
+  instead of one aggregate system/user pair, in the same colours and following
+  the same colour preferences — so a band means the same thing in both places.
+  The numbers beside it are each group's own utilization, which is what the
+  chart's legend reports; the band's height is that weighted by the group's
+  share of the cores, so a full stack is 100% of the machine. Idle no longer
+  has a row: the four series it made way for say more than it did.
+
 ## [0.4.1] - 2026-08-15
 
 ### Added

@@ -75,8 +75,12 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     /// System-wide summary shown in the footer, fed by the app each refresh.
     struct SystemStats {
-        var cpuUserPct = 0.0
-        var cpuSysPct = 0.0
+        /// Per-core-group user/system fractions, as the chart tab uses them.
+        var cpu = CPUFrame()
+        /// Each group's share of all logical cores, so a group's fraction can
+        /// be weighted into a share of the whole machine.
+        var pCoreShare = 0.0
+        var eCoreShare = 0.0
         var memoryUsedPct = 0.0
         var diskReadPerSec = 0.0
         var diskWritePerSec = 0.0
@@ -122,6 +126,15 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private(set) var currentTab: Tab = .cpu
     private var systemStats = SystemStats()
 
+    /// The chart tab's palette, so the CPU footer's four series read as the
+    /// same series there and here. Set by the app when preferences change.
+    var chartColors = ChartColors.load() {
+        didSet {
+            rebuildFooterPanes(for: currentTab)
+            refreshFooter()
+        }
+    }
+
     private let footer = FooterBar()
     /// Per-tick footer refresh, rebuilt on tab change to capture that tab's
     /// pane views (Activity-Monitor-style boxed grids/graphs).
@@ -129,7 +142,10 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     /// Ring of recent system samples feeding the footer graphs.
     private struct FooterSample {
-        var sys = 0.0, user = 0.0     // 0…1
+        // Each 0…1 as a share of the whole machine (the group's own
+        // utilization weighted by its share of the cores), so the four
+        // stacked together reach 1.0 at 100% system-wide CPU.
+        var pSys = 0.0, eSys = 0.0, pUser = 0.0, eUser = 0.0
         var mem = 0.0                 // 0…1
         var pressure = 0.0            // 0…1, drives the memory pressure graph
         var read = 0.0, write = 0.0   // bytes/sec
@@ -286,7 +302,8 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     func setSystemStats(_ s: SystemStats) {
         systemStats = s
         history.append(FooterSample(
-            sys: s.cpuSysPct / 100, user: s.cpuUserPct / 100,
+            pSys: s.cpu.pSys * s.pCoreShare, eSys: s.cpu.eSys * s.eCoreShare,
+            pUser: s.cpu.pUser * s.pCoreShare, eUser: s.cpu.eUser * s.eCoreShare,
             mem: s.memoryUsedPct / 100,
             pressure: s.memory.pressure,
             read: s.diskReadPerSec, write: s.diskWritePerSec,
@@ -305,22 +322,29 @@ final class ProcessListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
         switch tab {
         case .cpu:
+            // The chart tab's four CPU series, in its stack order and its
+            // colours: the numbers are each group's own utilization, the
+            // bands are those weighted by the group's share of the cores.
+            let c = self.chartColors
             let stats = FooterStatGrid(rows: [
-                .init(label: "System:", color: .systemRed),
-                .init(label: "User:", color: .systemBlue),
-                .init(label: "Idle:", color: nil),
+                .init(label: "Performance System:", color: c.pSys),
+                .init(label: "Efficiency System:", color: c.eSys),
+                .init(label: "Performance User:", color: c.pUser),
+                .init(label: "Efficiency User:", color: c.eUser),
             ])
             let graph = FooterGraphView(caption: "CPU Load",
-                                        colors: [.systemRed, .systemBlue], mode: .stack)
+                                        colors: [c.pSys, c.eSys, c.pUser, c.eUser],
+                                        mode: .stack)
             addPanes([stats, graph, threadsGrid])
             footerUpdate = { [weak self] in
                 guard let self else { return }
-                let s = self.systemStats
-                let idle = max(0, 100 - s.cpuUserPct - s.cpuSysPct)
-                stats.setValue(String(format: "%.2f%%", s.cpuSysPct), at: 0)
-                stats.setValue(String(format: "%.2f%%", s.cpuUserPct), at: 1)
-                stats.setValue(String(format: "%.2f%%", idle), at: 2)
-                graph.setLayers([self.history.map(\.sys), self.history.map(\.user)])
+                let cpu = self.systemStats.cpu
+                stats.setValue(String(format: "%.2f%%", cpu.pSys * 100), at: 0)
+                stats.setValue(String(format: "%.2f%%", cpu.eSys * 100), at: 1)
+                stats.setValue(String(format: "%.2f%%", cpu.pUser * 100), at: 2)
+                stats.setValue(String(format: "%.2f%%", cpu.eUser * 100), at: 3)
+                graph.setLayers([self.history.map(\.pSys), self.history.map(\.eSys),
+                                 self.history.map(\.pUser), self.history.map(\.eUser)])
                 self.updateThreadsGrid(threadsGrid)
             }
         case .memory:
